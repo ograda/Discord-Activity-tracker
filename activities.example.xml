@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<activity-tracker>
+    <!-- Create an application at https://discord.com/developers/applications -->
+    <discord-application-id>123456789012345678</discord-application-id>
+    <poll-seconds>5</poll-seconds>
+
+    <!-- XML order is display priority: the first running activity is primary. -->
+    <activity>
+        <name>World of Warcraft</name>
+        <windows-process>Wow.exe</windows-process>
+        <windows-process>WowClassic.exe</windows-process>
+    </activity>
+
+    <activity>
+        <name>Visual Studio Code</name>
+        <windows-process>Code.exe</windows-process>
+    </activity>
+
+    <activity>
+        <name>OBS Studio</name>
+        <windows-process>obs64.exe</windows-process>
+    </activity>
+</activity-tracker>

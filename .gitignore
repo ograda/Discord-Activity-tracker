@@ -1,0 +1,13 @@
+/target/
+/activities.xml
+/dist/
+
+/.vscode/
+/.idea/
+
+.env
+.env.*
+
+Thumbs.db
+Desktop.ini
+.DS_Store

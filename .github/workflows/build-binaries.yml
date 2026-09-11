@@ -1,0 +1,30 @@
+name: Build binaries
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build release executable
+        run: cargo build --release
+      - name: Prepare package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist
+          Copy-Item target/release/discord-activity-mvp.exe dist/
+          Copy-Item activities.example.xml dist/
+          Copy-Item README.md dist/
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: discord-activity-mvp-windows-x64
+          path: dist/
+
