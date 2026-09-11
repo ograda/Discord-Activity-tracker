@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 #[cfg(not(windows))]
 compile_error!("discord-activity-mvp currently supports Windows only");
 
