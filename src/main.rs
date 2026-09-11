@@ -5,6 +5,7 @@ mod config;
 mod discord;
 mod monitor;
 mod resolver;
+mod tray;
 
 use std::{
     env,
@@ -39,6 +40,8 @@ fn main() -> Result<()> {
         config_path.display(),
         config.poll_seconds
     );
+
+    tray::start();
 
     let running = Arc::new(AtomicBool::new(true));
     let signal = Arc::clone(&running);
