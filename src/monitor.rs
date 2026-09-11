@@ -31,4 +31,3 @@ impl ProcessMonitor {
 pub fn normalize_process_name(name: &str) -> String {
     name.trim().to_lowercase()
 }
-

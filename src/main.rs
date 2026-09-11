@@ -48,6 +48,7 @@ fn main() -> Result<()> {
     let (tray_sender, tray_receiver) = mpsc::channel();
     tray::start(tray_sender);
 
+    let hidden = Arc::new(AtomicBool::new(false));
     let running = Arc::new(AtomicBool::new(true));
 
     let signal = Arc::clone(&running);
@@ -56,23 +57,27 @@ fn main() -> Result<()> {
     })
     .context("could not install Ctrl+C handler")?;
 
+    let tracker_hidden = Arc::clone(&hidden);
     let tracker_running = Arc::clone(&running);
 
     let tracker_thread = thread::Builder::new()
         .name("activity-tracker".into())
-        .spawn(move || run_tracker(config, tracker_running))
+        .spawn(move || run_tracker(config, tracker_running, tracker_hidden))
         .context("could not start activity-tracker thread")?;
 
     // The main thread will handle tray events in the next step.
     // For now, it waits until Ctrl+C requests shutdown.
     while running.load(Ordering::SeqCst) {
-        match tray_receiver.recv_timeout(
-            Duration::from_millis(200),
-        ) {
-            Ok(TrayCommand::TogglePause) => {
-                println!("Pause / Resume selected.");
+        match tray_receiver.recv_timeout(Duration::from_millis(200)) {
+            Ok(TrayCommand::ToggleHidden) => {
+                println!("Hide / Show activities selected.");
+                let was_hidden = hidden.fetch_xor(true, Ordering::SeqCst);
 
-                // The actual tracker pause state is wired next.
+                if was_hidden {
+                    println!("Activities are now visible.");
+                } else {
+                    println!("Activities are now hidden.");
+                }
             }
 
             Ok(TrayCommand::Reload) => {
@@ -102,30 +107,50 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_tracker(
-    config: Config,
-    running: Arc<AtomicBool>,
-) -> Result<()> {
+fn run_tracker(config: Config, running: Arc<AtomicBool>, hidden: Arc<AtomicBool>) -> Result<()> {
     let mut monitor = ProcessMonitor::new();
-    let mut discord =
-        DiscordPresence::new(config.discord_application_id.clone());
+    let mut discord = DiscordPresence::new(config.discord_application_id.clone());
 
     let mut current: Option<ResolvedActivity> = None;
     let mut session_started_at = unix_timestamp_millis();
     let mut last_successful_send: Option<Instant> = None;
+    let mut hidden_presence_applied = false;
 
     while running.load(Ordering::SeqCst) {
+        if hidden.load(Ordering::SeqCst) {
+            if !hidden_presence_applied {
+                if let Err(error) = discord.set_hidden() {
+                    eprintln!("Could not hide activities: {error:#}");
+                }
+
+                current = None;
+                last_successful_send = None;
+                hidden_presence_applied = true;
+            }
+
+            wait_interruptibly(
+                Duration::from_secs(config.poll_seconds),
+                &running,
+                &hidden,
+                true,
+            );
+
+            continue;
+        }
+
+        if hidden_presence_applied {
+            session_started_at = unix_timestamp_millis();
+            last_successful_send = None;
+            hidden_presence_applied = false;
+        }
         let process_names = monitor.running_process_names();
 
-        let detected =
-            resolve_activities(&config.activities, &process_names);
+        let detected = resolve_activities(&config.activities, &process_names);
 
         let changed = detected != current;
 
-        let refresh_due = last_successful_send.is_none_or(|sent| {
-            sent.elapsed()
-                >= Duration::from_secs(PRESENCE_REFRESH_SECONDS)
-        });
+        let refresh_due = last_successful_send
+            .is_none_or(|sent| sent.elapsed() >= Duration::from_secs(PRESENCE_REFRESH_SECONDS));
 
         if changed {
             session_started_at = unix_timestamp_millis();
@@ -134,9 +159,7 @@ fn run_tracker(
 
         if changed || refresh_due {
             let result = match detected.as_ref() {
-                Some(activity) => {
-                    discord.set(activity, session_started_at)
-                }
+                Some(activity) => discord.set(activity, session_started_at),
                 None => discord.clear(),
             };
 
@@ -146,9 +169,7 @@ fn run_tracker(
                     last_successful_send = Some(Instant::now());
                 }
                 Err(error) => {
-                    eprintln!(
-                        "Discord is unavailable; retrying: {error:#}"
-                    );
+                    eprintln!("Discord is unavailable; retrying: {error:#}");
 
                     current = detected;
                     last_successful_send = None;
@@ -156,9 +177,11 @@ fn run_tracker(
             }
         }
 
-        sleep_interruptibly(
+        wait_interruptibly(
             Duration::from_secs(config.poll_seconds),
-            Arc::clone(&running),
+            &running,
+            &hidden,
+            false,
         );
     }
 
@@ -173,9 +196,7 @@ fn config_path() -> PathBuf {
 
     env::current_exe()
         .ok()
-        .and_then(|executable| {
-            executable.parent().map(PathBuf::from)
-        })
+        .and_then(|executable| executable.parent().map(PathBuf::from))
         .map(|directory| directory.join("activities.xml"))
         .unwrap_or_else(|| PathBuf::from("activities.xml"))
 }
@@ -187,10 +208,20 @@ fn unix_timestamp_millis() -> i64 {
         .as_millis() as i64
 }
 
-fn sleep_interruptibly(duration: Duration, running: Arc<AtomicBool>) {
+fn wait_interruptibly(
+    duration: Duration,
+    running: &AtomicBool,
+    hidden: &AtomicBool,
+    expected_hidden: bool,
+) {
     let deadline = Instant::now() + duration;
-    while running.load(Ordering::SeqCst) && Instant::now() < deadline {
+
+    while running.load(Ordering::SeqCst)
+        && hidden.load(Ordering::SeqCst) == expected_hidden
+        && Instant::now() < deadline
+    {
         let remaining = deadline.saturating_duration_since(Instant::now());
+
         thread::sleep(remaining.min(Duration::from_millis(200)));
     }
 }

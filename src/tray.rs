@@ -14,19 +14,14 @@ use windows_sys::Win32::{
     System::LibraryLoader::GetModuleHandleW,
     UI::{
         Shell::{
-            NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
-            NOTIFYICONDATAW, Shell_NotifyIconW,
+            NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
         },
         WindowsAndMessaging::{
-            AppendMenuW, CreatePopupMenu, CreateWindowExW,
-            DefWindowProcW, DestroyMenu, DestroyWindow,
-            DispatchMessageW, GetCursorPos, GetMessageW,
-            HMENU, IDI_APPLICATION, LoadIconW, MF_SEPARATOR,
-            MF_STRING, MSG, PostQuitMessage, RegisterClassW,
-            SetForegroundWindow, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
-            TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage,
-            WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY,
-            WM_RBUTTONUP, WNDCLASSW,
+            AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
+            DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, HMENU, IDI_APPLICATION,
+            LoadIconW, MF_SEPARATOR, MF_STRING, MSG, PostQuitMessage, RegisterClassW,
+            SetForegroundWindow, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, TrackPopupMenu,
+            TranslateMessage, WM_APP, WM_CLOSE, WM_COMMAND, WM_DESTROY, WM_RBUTTONUP, WNDCLASSW,
         },
     },
 };
@@ -34,18 +29,17 @@ use windows_sys::Win32::{
 const TRAY_ID: u32 = 1;
 const TRAY_CALLBACK: u32 = WM_APP + 1;
 
-const MENU_PAUSE: usize = 1001;
+const MENU_VISIBILITY: usize = 1001;
 const MENU_RELOAD: usize = 1002;
 const MENU_EXIT: usize = 1003;
 
-static COMMAND_SENDER: OnceLock<Sender<TrayCommand>> =
-    OnceLock::new();
+static COMMAND_SENDER: OnceLock<Sender<TrayCommand>> = OnceLock::new();
 
 static MENU_HANDLE: AtomicIsize = AtomicIsize::new(0);
 
 #[derive(Debug, Clone, Copy)]
 pub enum TrayCommand {
-    TogglePause,
+    ToggleHidden,
     Reload,
     Exit,
 }
@@ -73,8 +67,7 @@ fn run_tray() -> Result<(), &'static str> {
 
         let class_name = wide("DiscordActivityTrackerTray");
 
-        let mut window_class: WNDCLASSW =
-            std::mem::zeroed();
+        let mut window_class: WNDCLASSW = std::mem::zeroed();
 
         window_class.lpfnWndProc = Some(window_proc);
         window_class.hInstance = instance;
@@ -110,7 +103,7 @@ fn run_tray() -> Result<(), &'static str> {
             return Err("CreatePopupMenu failed");
         }
 
-        append_menu_item(menu, MENU_PAUSE, "Pause / Resume")?;
+        append_menu_item(menu, MENU_VISIBILITY, "Hide/Show activities")?;
         append_menu_item(menu, MENU_RELOAD, "Reload activities.xml")?;
 
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
@@ -119,27 +112,20 @@ fn run_tray() -> Result<(), &'static str> {
 
         MENU_HANDLE.store(menu as isize, Ordering::SeqCst);
 
-        let mut tray_data: NOTIFYICONDATAW =
-            std::mem::zeroed();
+        let mut tray_data: NOTIFYICONDATAW = std::mem::zeroed();
 
-        tray_data.cbSize =
-            size_of::<NOTIFYICONDATAW>() as u32;
+        tray_data.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
 
         tray_data.hWnd = window;
         tray_data.uID = TRAY_ID;
 
-        tray_data.uFlags =
-            NIF_ICON | NIF_MESSAGE | NIF_TIP;
+        tray_data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
 
         tray_data.uCallbackMessage = TRAY_CALLBACK;
 
-        tray_data.hIcon =
-            LoadIconW(null_mut(), IDI_APPLICATION);
+        tray_data.hIcon = LoadIconW(null_mut(), IDI_APPLICATION);
 
-        copy_tooltip(
-            &mut tray_data.szTip,
-            "Discord Activity Tracker",
-        );
+        copy_tooltip(&mut tray_data.szTip, "Discord Activity Tracker");
 
         if Shell_NotifyIconW(NIM_ADD, &tray_data) == 0 {
             DestroyMenu(menu);
@@ -149,13 +135,7 @@ fn run_tray() -> Result<(), &'static str> {
 
         let mut message: MSG = std::mem::zeroed();
 
-        while GetMessageW(
-            &mut message,
-            null_mut(),
-            0,
-            0,
-        ) > 0
-        {
+        while GetMessageW(&mut message, null_mut(), 0, 0) > 0 {
             TranslateMessage(&message);
             DispatchMessageW(&message);
         }
@@ -185,8 +165,8 @@ unsafe extern "system" fn window_proc(
             let command_id = wparam & 0xffff;
 
             match command_id {
-                MENU_PAUSE => {
-                    send_command(TrayCommand::TogglePause);
+                MENU_VISIBILITY => {
+                    send_command(TrayCommand::ToggleHidden);
                 }
 
                 MENU_RELOAD => {
@@ -224,20 +204,12 @@ unsafe extern "system" fn window_proc(
             0
         }
 
-        _ => unsafe {
-            DefWindowProcW(
-                window,
-                message,
-                wparam,
-                lparam,
-            )
-        },
+        _ => unsafe { DefWindowProcW(window, message, wparam, lparam) },
     }
 }
 
 unsafe fn show_menu(window: HWND) {
-    let menu: HMENU =
-    MENU_HANDLE.load(Ordering::SeqCst) as HMENU;
+    let menu: HMENU = MENU_HANDLE.load(Ordering::SeqCst) as HMENU;
 
     if menu.is_null() {
         return;
@@ -254,9 +226,7 @@ unsafe fn show_menu(window: HWND) {
 
         TrackPopupMenu(
             menu,
-            TPM_LEFTALIGN
-                | TPM_BOTTOMALIGN
-                | TPM_RIGHTBUTTON,
+            TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_RIGHTBUTTON,
             cursor.x,
             cursor.y,
             0,
@@ -267,11 +237,9 @@ unsafe fn show_menu(window: HWND) {
 }
 
 unsafe fn remove_tray_icon(window: HWND) {
-    let mut tray_data: NOTIFYICONDATAW =
-        unsafe { std::mem::zeroed() };
+    let mut tray_data: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
 
-    tray_data.cbSize =
-        size_of::<NOTIFYICONDATAW>() as u32;
+    tray_data.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
 
     tray_data.hWnd = window;
     tray_data.uID = TRAY_ID;
@@ -280,8 +248,7 @@ unsafe fn remove_tray_icon(window: HWND) {
         Shell_NotifyIconW(NIM_DELETE, &tray_data);
     }
 
-    let menu: HMENU =
-        MENU_HANDLE.swap(0, Ordering::SeqCst) as HMENU;
+    let menu: HMENU = MENU_HANDLE.swap(0, Ordering::SeqCst) as HMENU;
 
     if !menu.is_null() {
         unsafe {
@@ -290,21 +257,10 @@ unsafe fn remove_tray_icon(window: HWND) {
     }
 }
 
-fn append_menu_item(
-    menu: HMENU,
-    id: usize,
-    label: &str,
-) -> Result<(), &'static str> {
+fn append_menu_item(menu: HMENU, id: usize, label: &str) -> Result<(), &'static str> {
     let label = wide(label);
 
-    let result = unsafe {
-        AppendMenuW(
-            menu,
-            MF_STRING,
-            id,
-            label.as_ptr(),
-        )
-    };
+    let result = unsafe { AppendMenuW(menu, MF_STRING, id, label.as_ptr()) };
 
     if result == 0 {
         return Err("AppendMenuW failed");
@@ -320,14 +276,11 @@ fn send_command(command: TrayCommand) {
 }
 
 fn wide(text: &str) -> Vec<u16> {
-    text.encode_utf16()
-        .chain(std::iter::once(0))
-        .collect()
+    text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 fn copy_tooltip(destination: &mut [u16], text: &str) {
-    let maximum_length =
-        destination.len().saturating_sub(1);
+    let maximum_length = destination.len().saturating_sub(1);
 
     for (destination, character) in destination
         .iter_mut()

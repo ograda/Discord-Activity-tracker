@@ -34,6 +34,24 @@ impl DiscordPresence {
         Ok(())
     }
 
+    pub fn set_hidden(&mut self) -> Result<()> {
+        self.ensure_connected()?;
+
+        let payload = activity::Activity::new()
+            .details("Activities hidden")
+            .state("0 activities displayed");
+
+        if let Some(client) = &mut self.client {
+            if let Err(error) = client.set_activity(payload) {
+                self.disconnect();
+
+                return Err(error).context("could not publish hidden Discord presence");
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn clear(&mut self) -> Result<()> {
         if self.client.is_none() {
             return Ok(());
@@ -74,4 +92,3 @@ impl Drop for DiscordPresence {
         self.disconnect();
     }
 }
-

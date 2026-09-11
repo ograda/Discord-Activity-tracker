@@ -76,11 +76,7 @@ mod tests {
             definition("Visual Studio Code", "code"),
             definition("OBS Studio", "obs"),
         ];
-        let running = HashSet::from([
-            "obs".to_owned(),
-            "wow".to_owned(),
-            "code".to_owned(),
-        ]);
+        let running = HashSet::from(["obs".to_owned(), "wow".to_owned(), "code".to_owned()]);
 
         let result = resolve_activities(&definitions, &running).expect("should resolve");
         assert_eq!(

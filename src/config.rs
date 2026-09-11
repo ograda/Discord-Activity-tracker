@@ -41,9 +41,14 @@ impl Config {
 
     fn validate(&self) -> Result<()> {
         if self.discord_application_id.is_empty()
-            || !self.discord_application_id.chars().all(|c| c.is_ascii_digit())
+            || !self
+                .discord_application_id
+                .chars()
+                .all(|c| c.is_ascii_digit())
         {
-            bail!("discord-application-id must be the numeric ID from the Discord Developer Portal");
+            bail!(
+                "discord-application-id must be the numeric ID from the Discord Developer Portal"
+            );
         }
 
         if self.poll_seconds == 0 {
