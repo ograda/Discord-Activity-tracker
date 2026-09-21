@@ -1,23 +1,39 @@
-<?xml version="1.0" encoding="UTF-8"?>
 <activity-tracker>
-    <!-- Create an application at https://discord.com/developers/applications -->
-    <discord-application-id>123456789012345678</discord-application-id>
+    <discord-application-id>YOUR_NUMERIC_APPLICATION_ID</discord-application-id>
     <poll-seconds>5</poll-seconds>
 
-    <!-- XML order is display priority: the first running activity is primary. -->
+    <links>
+        <repository>https://github.com/ograda/Discord-Activity-tracker</repository>
+        <button>
+            <label>GitHub</label>
+            <url>https://github.com/ograda/Discord-Activity-tracker</url>
+        </button>
+        <button>
+            <label>My Website</label>
+            <url>https://example.com</url>
+        </button>
+    </links>
+
     <activity>
         <name>World of Warcraft</name>
+        <display-name>WoW</display-name>
+        <verb>Playing</verb>
+        <image>wow</image>
         <windows-process>Wow.exe</windows-process>
-        <windows-process>WowClassic.exe</windows-process>
     </activity>
 
     <activity>
         <name>Visual Studio Code</name>
+        <display-name>VS Code</display-name>
+        <verb>Coding with</verb>
+        <image>vscode</image>
         <windows-process>Code.exe</windows-process>
     </activity>
 
     <activity>
-        <name>OBS Studio</name>
-        <windows-process>obs64.exe</windows-process>
+        <name>Chrome</name>
+        <verb>Browsing with</verb>
+        <image>chrome</image>
+        <windows-process>chrome.exe</windows-process>
     </activity>
 </activity-tracker>

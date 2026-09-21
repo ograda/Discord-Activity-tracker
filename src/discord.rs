@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient, activity};
 
-use crate::{config::Links, resolver::ResolvedActivity};
+use crate::config::Links;
 
 pub struct DiscordPresence {
     application_id: String,
@@ -18,15 +18,30 @@ impl DiscordPresence {
 
     pub fn set(
         &mut self,
-        resolved: &ResolvedActivity,
+        details: &str,
+        state: &str,
+        large_image: &str,
+        large_hover: &str,
         started_at: i64,
         links: Option<&Links>,
     ) -> Result<()> {
         self.ensure_connected()?;
 
+        // "tracker" is the asset key for the small helmet overlay.
+        let mut assets = activity::Assets::new()
+            .large_image(large_image.to_owned())
+            .large_text(large_hover.to_owned())
+            .small_image("tracker")
+            .small_text("Activity Tracker");
+
+        if let Some(repository) = links.and_then(Links::repository) {
+            assets = assets.small_url(repository.to_owned());
+        }
+
         let payload = activity::Activity::new()
-            .details(&resolved.details)
-            .state(&resolved.state)
+            .details(details.to_owned())
+            .state(state.to_owned())
+            .assets(assets)
             .timestamps(activity::Timestamps::new().start(started_at))
             .buttons(buttons_from_links(links));
 
@@ -98,19 +113,26 @@ fn buttons_from_links(links: Option<&Links>) -> Vec<activity::Button<'static>> {
         return Vec::new();
     };
 
-    let mut buttons = Vec::with_capacity(2);
+    // New schema: zero, one or two generic, configurable buttons.
+    if !links.buttons().is_empty() {
+        return links
+            .buttons()
+            .iter()
+            .map(|button| activity::Button::new(button.label.clone(), button.url.clone()))
+            .collect();
+    }
 
+    // Backward compatibility with the old download/source XML.
+    let mut buttons = Vec::with_capacity(2);
     if let Some(download) = links.download() {
         buttons.push(activity::Button::new(
             "Baixar para Windows",
             download.to_owned(),
         ));
     }
-
     if let Some(source) = links.source() {
         buttons.push(activity::Button::new("Ver código-fonte", source.to_owned()));
     }
-
     buttons
 }
 
