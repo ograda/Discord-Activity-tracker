@@ -119,7 +119,7 @@ fn run_tracker(config: Config, running: Arc<AtomicBool>, hidden: Arc<AtomicBool>
     while running.load(Ordering::SeqCst) {
         if hidden.load(Ordering::SeqCst) {
             if !hidden_presence_applied {
-                if let Err(error) = discord.set_hidden() {
+                if let Err(error) = discord.set_hidden(config.links.as_ref()) {
                     eprintln!("Could not hide activities: {error:#}");
                 }
 
@@ -159,7 +159,7 @@ fn run_tracker(config: Config, running: Arc<AtomicBool>, hidden: Arc<AtomicBool>
 
         if changed || refresh_due {
             let result = match detected.as_ref() {
-                Some(activity) => discord.set(activity, session_started_at),
+                Some(activity) => discord.set(activity, session_started_at, config.links.as_ref()),
                 None => discord.clear(),
             };
 

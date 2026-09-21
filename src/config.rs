@@ -12,6 +12,8 @@ pub struct Config {
     #[serde(rename = "poll-seconds", default = "default_poll_seconds")]
     pub poll_seconds: u64,
 
+    pub links: Option<Links>,
+
     #[serde(rename = "activity", default)]
     pub activities: Vec<ActivityDefinition>,
 }
@@ -24,6 +26,15 @@ pub struct ActivityDefinition {
     pub windows_processes: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Links {
+    #[serde(default)]
+    download: Option<String>,
+
+    #[serde(default)]
+    source: Option<String>,
+}
+
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let xml = fs::read_to_string(path).context("could not read XML file")?;
@@ -33,6 +44,10 @@ impl Config {
         for activity in &mut config.activities {
             activity.name = activity.name.trim().to_owned();
             trim_all(&mut activity.windows_processes);
+        }
+
+        if let Some(links) = &mut config.links {
+            links.trim();
         }
 
         config.validate()?;
@@ -55,6 +70,17 @@ impl Config {
             bail!("poll-seconds must be greater than zero");
         }
 
+        if let Some(links) = &self.links {
+            for (name, url) in [("download", links.download()), ("source", links.source())] {
+                if let Some(url) = url
+                    && !url.starts_with("https://")
+                    && !url.starts_with("http://")
+                {
+                    bail!("link '{name}' must start with http:// or https://");
+                }
+            }
+        }
+
         if self.activities.is_empty() {
             bail!("at least one activity is required");
         }
@@ -73,6 +99,21 @@ impl Config {
     }
 }
 
+impl Links {
+    pub fn download(&self) -> Option<&str> {
+        self.download.as_deref()
+    }
+
+    pub fn source(&self) -> Option<&str> {
+        self.source.as_deref()
+    }
+
+    fn trim(&mut self) {
+        normalize_optional(&mut self.download);
+        normalize_optional(&mut self.source);
+    }
+}
+
 impl ActivityDefinition {
     pub fn process_names(&self) -> &[String] {
         &self.windows_processes
@@ -84,6 +125,13 @@ fn trim_all(values: &mut Vec<String>) {
         *value = value.trim().to_owned();
     }
     values.retain(|value| !value.is_empty());
+}
+
+fn normalize_optional(value: &mut Option<String>) {
+    *value = value
+        .take()
+        .map(|text| text.trim().to_owned())
+        .filter(|text| !text.is_empty());
 }
 
 fn default_poll_seconds() -> u64 {
