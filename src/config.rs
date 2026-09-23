@@ -31,6 +31,15 @@ pub struct ActivityDefinition {
     #[serde(default)]
     pub image: Option<String>,
 
+    #[serde(rename = "image-url", default)]
+    pub image_url: Option<String>,
+
+    #[serde(rename = "buttons-enabled", default = "default_true")]
+    pub buttons_enabled: bool,
+
+    #[serde(rename = "button", default)]
+    pub buttons: Vec<ButtonConfig>,
+
     #[serde(rename = "windows-process", default)]
     pub windows_processes: Vec<String>,
 }
@@ -68,6 +77,10 @@ impl Config {
             normalize_optional(&mut activity.display_name);
             normalize_optional(&mut activity.verb);
             normalize_optional(&mut activity.image);
+            normalize_optional(&mut activity.image_url);
+            for button in &mut activity.buttons {
+                button.trim();
+            }
             trim_all(&mut activity.windows_processes);
         }
 
@@ -106,15 +119,7 @@ impl Config {
                 }
             }
 
-            if links.buttons.len() > 2 {
-                bail!("at most two <button> entries are supported");
-            }
-            for button in &links.buttons {
-                if button.label.is_empty() || button.label.chars().count() > 32 {
-                    bail!("button labels must contain 1 to 32 characters");
-                }
-                validate_url(&button.label, &button.url)?;
-            }
+            validate_buttons("global links", &links.buttons)?;
         }
 
         if self.activities.is_empty() {
@@ -132,6 +137,19 @@ impl Config {
 
             if activity.windows_processes.is_empty() {
                 bail!("activity '{}' has no process names", activity.name);
+            }
+
+            if let Some(url) = activity.image_url.as_deref() {
+                validate_url(&format!("image-url for '{}'", activity.name), url)?;
+            }
+
+            validate_buttons(&format!("activity '{}'", activity.name), &activity.buttons)?;
+
+            if !activity.buttons_enabled && !activity.buttons.is_empty() {
+                bail!(
+                    "activity '{}' has <buttons-enabled>false</buttons-enabled> and also defines <button>",
+                    activity.name
+                );
             }
         }
 
@@ -173,6 +191,50 @@ impl ActivityDefinition {
     }
 }
 
+impl ButtonConfig {
+    fn trim(&mut self) {
+        self.label = self.label.trim().to_owned();
+        self.url = self.url.trim().to_owned();
+    }
+}
+
+pub fn selected_buttons<'a>(
+    selected: Option<&'a ActivityDefinition>,
+    links: Option<&'a Links>,
+) -> &'a [ButtonConfig] {
+    if let Some(activity) = selected {
+        if !activity.buttons_enabled {
+            return &[];
+        }
+
+        if !activity.buttons.is_empty() {
+            return &activity.buttons;
+        }
+    }
+
+    links.map(Links::buttons).unwrap_or(&[])
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn validate_buttons(scope: &str, buttons: &[ButtonConfig]) -> Result<()> {
+    if buttons.len() > 2 {
+        bail!("{scope} supports at most two <button> entries");
+    }
+
+    for button in buttons {
+        if button.label.is_empty() || button.label.chars().count() > 32 {
+            bail!("{scope}: button labels must contain 1 to 32 characters");
+        }
+
+        validate_url(&button.label, &button.url)?;
+    }
+
+    Ok(())
+}
+
 fn trim_all(values: &mut Vec<String>) {
     for value in values.iter_mut() {
         *value = value.trim().to_owned();
@@ -190,6 +252,9 @@ fn normalize_optional(value: &mut Option<String>) {
 fn validate_url(name: &str, url: &str) -> Result<()> {
     if !url.starts_with("https://") && !url.starts_with("http://") {
         bail!("link '{name}' must start with http:// or https://");
+    }
+    if url.len() > 512 {
+        bail!("link '{name}' must not exceed 512 bytes");
     }
     Ok(())
 }

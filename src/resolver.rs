@@ -65,6 +65,15 @@ mod tests {
     fn definition(name: &str, process: &str) -> ActivityDefinition {
         ActivityDefinition {
             name: name.to_owned(),
+
+            display_name: None,
+            verb: None,
+            image: None,
+            image_url: None,
+
+            buttons_enabled: true,
+            buttons: Vec::new(),
+
             windows_processes: vec![process.to_owned()],
         }
     }

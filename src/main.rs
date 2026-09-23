@@ -118,7 +118,7 @@ fn run_tracker(config: Config, running: Arc<AtomicBool>, hidden: Arc<AtomicBool>
     // Native Discord timer: one uninterrupted visible tracking session.
     let mut session_started_at: Option<i64> = None;
     let mut rotation_started_at = Instant::now();
-    let mut last_sent: Option<(String, String, String, String)> = None;
+    let mut last_sent: Option<(String, String, String, String, String)> = None;
     let mut last_successful_send: Option<Instant> = None;
     let mut hidden_presence_applied = false;
 
@@ -252,6 +252,7 @@ fn run_tracker(config: Config, running: Arc<AtomicBool>, hidden: Arc<AtomicBool>
             state.clone(),
             image.to_owned(),
             hover.clone(),
+            selected.to_string(),
         );
         if last_sent.as_ref() != Some(&signature) || refresh_due {
             match discord.set(
@@ -259,6 +260,7 @@ fn run_tracker(config: Config, running: Arc<AtomicBool>, hidden: Arc<AtomicBool>
                 &state,
                 image,
                 &hover,
+                definition,
                 session_started_at.expect("active session has a start time"),
                 config.links.as_ref(),
             ) {

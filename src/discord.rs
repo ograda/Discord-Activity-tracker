@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient, activity};
 
-use crate::config::Links;
+use crate::config::{ActivityDefinition, ButtonConfig, Links, selected_buttons};
 
 pub struct DiscordPresence {
     application_id: String,
@@ -22,6 +22,7 @@ impl DiscordPresence {
         state: &str,
         large_image: &str,
         large_hover: &str,
+        selected: Option<&ActivityDefinition>,
         started_at: i64,
         links: Option<&Links>,
     ) -> Result<()> {
@@ -38,12 +39,16 @@ impl DiscordPresence {
             assets = assets.small_url(repository.to_owned());
         }
 
+        if let Some(url) = selected.and_then(|activity| activity.image_url.as_deref()) {
+            assets = assets.large_url(url.to_owned());
+        }
+
         let payload = activity::Activity::new()
             .details(details.to_owned())
             .state(state.to_owned())
             .assets(assets)
             .timestamps(activity::Timestamps::new().start(started_at))
-            .buttons(buttons_from_links(links));
+            .buttons(buttons_from_links(links, selected));
 
         if let Some(client) = &mut self.client {
             if let Err(error) = client.set_activity(payload) {
@@ -61,7 +66,7 @@ impl DiscordPresence {
         let payload = activity::Activity::new()
             .details("Activities hidden")
             .state("0 activities displayed")
-            .buttons(buttons_from_links(links));
+            .buttons(buttons_from_links(links, None));
 
         if let Some(client) = &mut self.client {
             if let Err(error) = client.set_activity(payload) {
@@ -108,32 +113,45 @@ impl DiscordPresence {
     }
 }
 
-fn buttons_from_links(links: Option<&Links>) -> Vec<activity::Button<'static>> {
+fn buttons_from_links(
+    links: Option<&Links>,
+    selected: Option<&ActivityDefinition>,
+) -> Vec<activity::Button<'static>> {
+    let buttons = selected_buttons(selected, links);
+
+    // Individual buttons replace the global buttons entirely.
+    if !buttons.is_empty() {
+        return buttons.iter().map(to_discord_button).collect();
+    }
+
+    // Explicitly disabled: do not use global fallback.
+    if selected.is_some_and(|activity| !activity.buttons_enabled) {
+        return Vec::new();
+    }
+
+    // Backward compatibility with legacy download/source.
     let Some(links) = links else {
         return Vec::new();
     };
 
-    // New schema: zero, one or two generic, configurable buttons.
-    if !links.buttons().is_empty() {
-        return links
-            .buttons()
-            .iter()
-            .map(|button| activity::Button::new(button.label.clone(), button.url.clone()))
-            .collect();
-    }
-
-    // Backward compatibility with the old download/source XML.
     let mut buttons = Vec::with_capacity(2);
+
     if let Some(download) = links.download() {
         buttons.push(activity::Button::new(
             "Baixar para Windows",
             download.to_owned(),
         ));
     }
+
     if let Some(source) = links.source() {
         buttons.push(activity::Button::new("Ver código-fonte", source.to_owned()));
     }
+
     buttons
+}
+
+fn to_discord_button(button: &ButtonConfig) -> activity::Button<'static> {
+    activity::Button::new(button.label.clone(), button.url.clone())
 }
 
 impl Drop for DiscordPresence {
