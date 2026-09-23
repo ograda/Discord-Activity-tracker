@@ -16,6 +16,7 @@ impl DiscordPresence {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn set(
         &mut self,
         details: &str,
@@ -50,11 +51,11 @@ impl DiscordPresence {
             .timestamps(activity::Timestamps::new().start(started_at))
             .buttons(buttons_from_links(links, selected));
 
-        if let Some(client) = &mut self.client {
-            if let Err(error) = client.set_activity(payload) {
-                self.disconnect();
-                return Err(error).context("could not update Discord Rich Presence");
-            }
+        if let Some(client) = &mut self.client
+            && let Err(error) = client.set_activity(payload)
+        {
+            self.disconnect();
+            return Err(error).context("could not update Discord Rich Presence");
         }
 
         Ok(())
@@ -68,11 +69,11 @@ impl DiscordPresence {
             .state("0 activities displayed")
             .buttons(buttons_from_links(links, None));
 
-        if let Some(client) = &mut self.client {
-            if let Err(error) = client.set_activity(payload) {
-                self.disconnect();
-                return Err(error).context("could not publish hidden Discord presence");
-            }
+        if let Some(client) = &mut self.client
+            && let Err(error) = client.set_activity(payload)
+        {
+            self.disconnect();
+            return Err(error).context("could not update Discord Rich Presence");
         }
 
         Ok(())
@@ -83,11 +84,11 @@ impl DiscordPresence {
             return Ok(());
         }
 
-        if let Some(client) = &mut self.client {
-            if let Err(error) = client.clear_activity() {
-                self.disconnect();
-                return Err(error).context("could not clear Discord Rich Presence");
-            }
+        if let Some(client) = &mut self.client
+            && let Err(error) = client.clear_activity()
+        {
+            self.disconnect();
+            return Err(error).context("could not clear Discord Rich Presence");
         }
 
         Ok(())
