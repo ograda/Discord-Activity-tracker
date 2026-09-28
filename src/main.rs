@@ -6,6 +6,9 @@ compile_error!("discord-activity-mvp currently supports Windows only");
 mod config;
 mod discord;
 mod monitor;
+mod reminder_hud;
+mod reminder_sound;
+mod reminders;
 mod resolver;
 mod tray;
 
@@ -28,6 +31,7 @@ use crate::{
     config::Config,
     discord::DiscordPresence,
     monitor::ProcessMonitor,
+    reminders::{ReminderAction, ReminderManager},
     resolver::{ResolvedActivity, resolve_activities},
     tray::TrayCommand,
 };
@@ -37,6 +41,12 @@ const IMAGE_ROTATION_SECONDS: u64 = 30;
 
 fn main() -> Result<()> {
     let config_path = config_path();
+    let config_directory = config_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+
     let config = Config::load(&config_path)
         .with_context(|| format!("could not load {}", config_path.display()))?;
 
@@ -50,6 +60,9 @@ fn main() -> Result<()> {
     let (tray_sender, tray_receiver) = mpsc::channel();
     tray::start(tray_sender);
 
+    let (reminder_action_sender, reminder_action_receiver) = mpsc::channel();
+
+    reminder_hud::start(reminder_action_sender);
     let hidden = Arc::new(AtomicBool::new(false));
     let running = Arc::new(AtomicBool::new(true));
 
@@ -64,7 +77,15 @@ fn main() -> Result<()> {
 
     let tracker_thread = thread::Builder::new()
         .name("activity-tracker".into())
-        .spawn(move || run_tracker(config, tracker_running, tracker_hidden))
+        .spawn(move || {
+            run_tracker(
+                config,
+                config_directory,
+                tracker_running,
+                tracker_hidden,
+                reminder_action_receiver,
+            )
+        })
         .context("could not start activity-tracker thread")?;
 
     // The main thread will handle tray events in the next step.
@@ -101,17 +122,28 @@ fn main() -> Result<()> {
         }
     }
 
-    tracker_thread
+    let tracker_result = tracker_thread
         .join()
-        .map_err(|_| anyhow!("activity-tracker thread panicked"))??;
+        .map_err(|_| anyhow!("activity-tracker thread panicked"))?;
+
+    reminder_hud::shutdown();
+
+    tracker_result?;
 
     println!("Stopped.");
     Ok(())
 }
 
-fn run_tracker(config: Config, running: Arc<AtomicBool>, hidden: Arc<AtomicBool>) -> Result<()> {
+fn run_tracker(
+    config: Config,
+    config_directory: PathBuf,
+    running: Arc<AtomicBool>,
+    hidden: Arc<AtomicBool>,
+    reminder_actions: mpsc::Receiver<ReminderAction>,
+) -> Result<()> {
     let mut monitor = ProcessMonitor::new();
     let mut discord = DiscordPresence::new(config.discord_application_id.clone());
+    let mut reminder_manager = ReminderManager::new(config.reminders.definitions(), Instant::now());
 
     let mut current: Option<ResolvedActivity> = None;
     let mut activity_starts: HashMap<String, Instant> = HashMap::new();
@@ -123,6 +155,24 @@ fn run_tracker(config: Config, running: Arc<AtomicBool>, hidden: Arc<AtomicBool>
     let mut hidden_presence_applied = false;
 
     while running.load(Ordering::SeqCst) {
+        let now = Instant::now();
+
+        let reminders_changed =
+            drain_reminder_actions(&reminder_actions, &mut reminder_manager, now);
+
+        let newly_due = reminder_manager.tick(now);
+
+        if reminders_changed || !newly_due.is_empty() {
+            reminder_hud::render(reminder_manager.snapshot());
+        }
+
+        if let Some(sound) = newly_due
+            .first()
+            .and_then(|reminder| reminder.sound.as_deref())
+        {
+            reminder_sound::play(&config_directory.join(sound));
+        }
+
         if hidden.load(Ordering::SeqCst) {
             if !hidden_presence_applied {
                 match discord.set_hidden(config.links.as_ref()) {
@@ -143,6 +193,8 @@ fn run_tracker(config: Config, running: Arc<AtomicBool>, hidden: Arc<AtomicBool>
                 &running,
                 &hidden,
                 true,
+                &reminder_actions,
+                &mut reminder_manager,
             );
             continue;
         }
@@ -188,6 +240,8 @@ fn run_tracker(config: Config, running: Arc<AtomicBool>, hidden: Arc<AtomicBool>
                 &running,
                 &hidden,
                 false,
+                &reminder_actions,
+                &mut reminder_manager,
             );
             continue;
         }
@@ -281,6 +335,8 @@ fn run_tracker(config: Config, running: Arc<AtomicBool>, hidden: Arc<AtomicBool>
             &running,
             &hidden,
             false,
+            &reminder_actions,
+            &mut reminder_manager,
         );
     }
 
@@ -336,6 +392,8 @@ fn wait_interruptibly(
     running: &AtomicBool,
     hidden: &AtomicBool,
     expected_hidden: bool,
+    reminder_actions: &mpsc::Receiver<ReminderAction>,
+    reminder_manager: &mut ReminderManager,
 ) {
     let deadline = Instant::now() + duration;
 
@@ -343,10 +401,28 @@ fn wait_interruptibly(
         && hidden.load(Ordering::SeqCst) == expected_hidden
         && Instant::now() < deadline
     {
+        if drain_reminder_actions(reminder_actions, reminder_manager, Instant::now()) {
+            reminder_hud::render(reminder_manager.snapshot());
+        }
+
         let remaining = deadline.saturating_duration_since(Instant::now());
 
         thread::sleep(remaining.min(Duration::from_millis(200)));
     }
+}
+
+fn drain_reminder_actions(
+    receiver: &mpsc::Receiver<ReminderAction>,
+    manager: &mut ReminderManager,
+    now: Instant,
+) -> bool {
+    let mut changed = false;
+
+    while let Ok(action) = receiver.try_recv() {
+        changed |= manager.apply(action, now);
+    }
+
+    changed
 }
 
 fn print_change(activity: Option<&ResolvedActivity>) {

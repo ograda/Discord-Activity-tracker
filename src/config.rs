@@ -16,6 +16,9 @@ pub struct Config {
 
     #[serde(rename = "activity", default)]
     pub activities: Vec<ActivityDefinition>,
+
+    #[serde(default)]
+    pub reminders: ReminderList,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,6 +45,29 @@ pub struct ActivityDefinition {
 
     #[serde(rename = "windows-process", default)]
     pub windows_processes: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct ReminderList {
+    #[serde(rename = "reminder", default)]
+    items: Vec<ReminderDefinition>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReminderDefinition {
+    pub name: String,
+
+    #[serde(rename = "interval-minutes")]
+    pub interval_minutes: u64,
+
+    #[serde(default)]
+    pub icon: Option<String>,
+
+    #[serde(default)]
+    pub sound: Option<String>,
+
+    #[serde(rename = "snooze-minutes", default = "default_snooze_minutes")]
+    pub snooze_minutes: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,6 +108,12 @@ impl Config {
                 button.trim();
             }
             trim_all(&mut activity.windows_processes);
+        }
+
+        for reminder in &mut config.reminders.items {
+            reminder.name = reminder.name.trim().to_owned();
+            normalize_optional(&mut reminder.icon);
+            normalize_optional(&mut reminder.sound);
         }
 
         if let Some(links) = &mut config.links {
@@ -153,7 +185,38 @@ impl Config {
             }
         }
 
+        let mut seen_reminders = std::collections::HashSet::new();
+        for (index, reminder) in self.reminders.items.iter().enumerate() {
+            if reminder.name.is_empty() {
+                bail!("reminder {} has an empty name", index + 1);
+            }
+
+            if !seen_reminders.insert(&reminder.name) {
+                bail!("duplicate reminder name: '{}'", reminder.name);
+            }
+
+            if reminder.interval_minutes == 0 {
+                bail!(
+                    "reminder '{}' must have interval-minutes greater than zero",
+                    reminder.name
+                );
+            }
+
+            if reminder.snooze_minutes == 0 {
+                bail!(
+                    "reminder '{}' must have snooze-minutes greater than zero",
+                    reminder.name
+                );
+            }
+        }
+
         Ok(())
+    }
+}
+
+impl ReminderList {
+    pub fn definitions(&self) -> &[ReminderDefinition] {
+        &self.items
     }
 }
 
@@ -261,6 +324,10 @@ fn validate_url(name: &str, url: &str) -> Result<()> {
 
 fn default_poll_seconds() -> u64 {
     5
+}
+
+fn default_snooze_minutes() -> u64 {
+    10
 }
 
 #[cfg(test)]

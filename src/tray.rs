@@ -28,7 +28,7 @@ use windows_sys::Win32::{
 
 const TRAY_ID: u32 = 1;
 const TRAY_CALLBACK: u32 = WM_APP + 1;
-
+const APP_ICON_ID: usize = 1;
 const MENU_VISIBILITY: usize = 1001;
 const MENU_RELOAD: usize = 1002;
 const MENU_EXIT: usize = 1003;
@@ -123,7 +123,24 @@ fn run_tray() -> Result<(), &'static str> {
 
         tray_data.uCallbackMessage = TRAY_CALLBACK;
 
-        tray_data.hIcon = LoadIconW(null_mut(), IDI_APPLICATION);
+        let custom_icon = LoadIconW(instance, APP_ICON_ID as usize as *const u16);
+
+        let tray_icon = if custom_icon.is_null() {
+            eprintln!("Could not load embedded DAT icon; using Windows fallback icon.");
+
+            LoadIconW(null_mut(), IDI_APPLICATION)
+        } else {
+            custom_icon
+        };
+
+        if tray_icon.is_null() {
+            DestroyMenu(menu);
+            DestroyWindow(window);
+
+            return Err("could not load tray icon");
+        }
+
+        tray_data.hIcon = tray_icon;
 
         copy_tooltip(&mut tray_data.szTip, "Discord Activity Tracker");
 
