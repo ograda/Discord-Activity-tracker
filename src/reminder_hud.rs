@@ -19,11 +19,12 @@ use windows_sys::Win32::{
     UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, FindWindowW,
         GetClientRect, GetMessageW, GetSystemMetrics, GetWindowRect, HWND_TOPMOST, IDC_ARROW,
-        LWA_COLORKEY, LoadCursorW, MA_NOACTIVATE, MSG, PostMessageW, PostQuitMessage,
-        RegisterClassW, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW,
-        SetLayeredWindowAttributes, SetWindowPos, ShowWindow, TranslateMessage, WM_APP, WM_CLOSE,
-        WM_DESTROY, WM_ERASEBKGND, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_PAINT, WNDCLASSW,
-        WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+        KillTimer, LWA_COLORKEY, LoadCursorW, MA_NOACTIVATE, MSG, PostMessageW, PostQuitMessage,
+        RegisterClassW, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+        SWP_SHOWWINDOW, SetLayeredWindowAttributes, SetTimer, SetWindowPos, ShowWindow,
+        TranslateMessage, WM_APP, WM_CLOSE, WM_DESTROY, WM_ERASEBKGND, WM_LBUTTONUP,
+        WM_MOUSEACTIVATE, WM_PAINT, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
     },
 };
 
@@ -171,6 +172,26 @@ unsafe extern "system" fn window_proc(
             0
         }
 
+        WM_TIMER => {
+            if !current_snapshot().pending.is_empty() {
+                unsafe {
+                    // Reassert z-order without activation. Losing focus is never
+                    // a reminder action and must not demote a pending HUD.
+                    SetWindowPos(
+                        window,
+                        HWND_TOPMOST,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    );
+                    InvalidateRect(window, null(), 0);
+                }
+            }
+            0
+        }
+
         WM_PAINT => {
             paint(window);
             0
@@ -210,6 +231,7 @@ fn apply_snapshot(window: HWND) {
 
     if snapshot.pending.is_empty() {
         unsafe {
+            KillTimer(window, 1);
             ShowWindow(window, SW_HIDE);
         }
 
@@ -221,6 +243,7 @@ fn apply_snapshot(window: HWND) {
     let (x, y) = taskbar_anchor(layout.width, layout.height);
 
     unsafe {
+        SetTimer(window, 1, 1000, None);
         SetWindowPos(
             window,
             HWND_TOPMOST,
@@ -341,6 +364,12 @@ fn paint_toast(hdc: HDC, rectangle: UiRect, toast: &ReminderToast, compact: bool
         unsafe {
             SetTextColor(hdc, TEXT_SECONDARY);
         }
+        text_out(
+            hdc,
+            rectangle.left + 36,
+            rectangle.top + 36,
+            &crate::reminders::format_elapsed(toast.first_due.elapsed().as_secs()),
+        );
     }
 }
 
@@ -642,4 +671,28 @@ fn wide(text: &str) -> Vec<u16> {
 
 const fn rgb(red: u8, green: u8, blue: u8) -> u32 {
     red as u32 | ((green as u32) << 8) | ((blue as u32) << 16)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn stacked_layout_preserves_active_buttons_previews_and_overflow() {
+        let single = Layout::new(1);
+        assert!(single.previews.is_empty());
+        assert!(single.overflow.is_none());
+        let many = Layout::new(5);
+        assert_eq!(many.previews.len(), 2);
+        assert_eq!(many.hidden_count, 2);
+        assert!(many.overflow.is_some());
+        assert!(many.done.top > many.active.top + 50);
+        assert!(many.snooze.top == many.done.top);
+        assert!(
+            many.previews
+                .iter()
+                .all(|(_, r)| r.bottom < many.active.top)
+        );
+        assert_eq!(many.previews[0].0, 1);
+        assert_eq!(many.previews[1].0, 2);
+    }
 }

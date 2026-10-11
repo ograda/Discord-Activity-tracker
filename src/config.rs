@@ -21,9 +21,20 @@ pub struct Config {
     pub reminders: ReminderList,
 }
 
+#[derive(Debug, Deserialize, Default, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum InstanceCountMode {
+    #[default]
+    Windows,
+    Processes,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ActivityDefinition {
     pub name: String,
+
+    #[serde(rename = "instance-count-mode", default)]
+    pub instance_count_mode: InstanceCountMode,
 
     #[serde(rename = "display-name", default)]
     pub display_name: Option<String>,
@@ -36,6 +47,9 @@ pub struct ActivityDefinition {
 
     #[serde(rename = "image-url", default)]
     pub image_url: Option<String>,
+
+    #[serde(rename = "tracker-status", default)]
+    pub tracker_status: Option<String>,
 
     #[serde(rename = "buttons-enabled", default = "default_true")]
     pub buttons_enabled: bool,
@@ -104,6 +118,7 @@ impl Config {
             normalize_optional(&mut activity.verb);
             normalize_optional(&mut activity.image);
             normalize_optional(&mut activity.image_url);
+            normalize_optional(&mut activity.tracker_status);
             for button in &mut activity.buttons {
                 button.trim();
             }

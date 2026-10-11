@@ -11,6 +11,7 @@ winres = "0.1"
 [dependencies]
 anyhow = "1.0"
 ctrlc = "3.4"
+rusqlite = { version = "0.38", features = ["bundled"] }
 discord-rich-presence = "1.1"
 quick-xml = { version = "0.42", features = ["serialize"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -19,12 +20,19 @@ sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Storage_FileSystem",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
     "Win32_System_LibraryLoader",
+    "Win32_System_SystemServices",
     "Win32_UI_Shell",
+    "Win32_UI_Controls",
     "Win32_UI_WindowsAndMessaging",
 	"Win32_Media_Audio",
 ] }
+
+[dev-dependencies]
+serde_json = "1.0"
 
 [profile.release]
 codegen-units = 1

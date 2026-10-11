@@ -1,112 +1,164 @@
-use std::collections::HashSet;
-
-use crate::{config::ActivityDefinition, monitor::normalize_process_name};
-
-const DISCORD_FIELD_LIMIT: usize = 128;
+use crate::{
+    config::{ActivityDefinition, InstanceCountMode},
+    monitor::{ProcessSnapshot, normalize_process_name},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedActivity {
-    pub names: Vec<String>,
-    pub details: String,
-    pub state: String,
+pub struct ActivityObservation {
+    pub name: String,
+    pub pids: Vec<u32>,
+    pub foreground: bool,
+    pub window_count: usize,
+}
+impl ActivityObservation {
+    pub fn process_count(&self) -> usize {
+        self.pids.len()
+    }
+    // Presentation choice only: raw counts and session accounting stay unchanged.
+    pub fn displayed_instances(&self, mode: InstanceCountMode) -> usize {
+        match mode {
+            InstanceCountMode::Windows => self.instance_count(),
+            InstanceCountMode::Processes => self.process_count(),
+        }
+    }
+    pub fn instance_count(&self) -> usize {
+        self.window_count.max(1)
+    }
 }
 
 pub fn resolve_activities(
     definitions: &[ActivityDefinition],
-    running_processes: &HashSet<String>,
-) -> Option<ResolvedActivity> {
-    let names: Vec<String> = definitions
+    snapshot: &ProcessSnapshot,
+) -> Vec<ActivityObservation> {
+    definitions
         .iter()
-        .filter(|definition| {
-            definition
+        .filter_map(|definition| {
+            let names: Vec<_> = definition
                 .process_names()
                 .iter()
-                .map(|name| normalize_process_name(name))
-                .any(|name| running_processes.contains(&name))
+                .map(|n| normalize_process_name(n))
+                .collect();
+            let mut pids: Vec<_> = snapshot
+                .processes
+                .iter()
+                .filter(|(_, name)| names.contains(name))
+                .map(|(pid, _)| *pid)
+                .collect();
+            pids.sort_unstable();
+            pids.dedup();
+            if pids.is_empty() {
+                return None;
+            }
+            let foreground = snapshot
+                .foreground_pid
+                .is_some_and(|pid| pids.contains(&pid));
+            let window_count = snapshot
+                .application_windows
+                .iter()
+                .filter(|pid| pids.contains(pid))
+                .count();
+            Some(ActivityObservation {
+                window_count,
+                name: definition.name.clone(),
+                pids,
+                foreground,
+            })
         })
-        .map(|definition| definition.name.clone())
-        .collect();
-
-    if names.is_empty() {
-        return None;
-    }
-
-    let details = truncate(&format!("Active: {}", names[0]), DISCORD_FIELD_LIMIT);
-    let state = if names.len() == 1 {
-        "1 selected activity".to_owned()
-    } else {
-        truncate(
-            &format!("Also: {}", names[1..].join(" + ")),
-            DISCORD_FIELD_LIMIT,
-        )
-    };
-
-    Some(ResolvedActivity {
-        names,
-        details,
-        state,
-    })
+        .collect()
 }
-
-fn truncate(value: &str, max_chars: usize) -> String {
-    if value.chars().count() <= max_chars {
-        return value.to_owned();
-    }
-
-    let mut truncated: String = value.chars().take(max_chars.saturating_sub(1)).collect();
-    truncated.push('…');
-    truncated
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
 
-    fn definition(name: &str, process: &str) -> ActivityDefinition {
-        ActivityDefinition {
-            name: name.to_owned(),
+    #[test]
+    fn electron_helpers_are_processes_not_user_instances() {
+        let definitions: Vec<ActivityDefinition> = vec![
+            quick_xml::de::from_str(
+                "<activity><name>Code</name><instance-count-mode>windows</instance-count-mode><windows-process>Code.exe</windows-process></activity>",
+            )
+            .unwrap(),
+        ];
+        let mut snapshot = ProcessSnapshot {
+            processes: (1..=10).map(|pid| (pid, "code.exe".into())).collect(),
+            application_windows: vec![1],
+            foreground_pid: Some(1),
+        };
+        let result = resolve_activities(&definitions, &snapshot);
+        assert_eq!(result[0].process_count(), 10);
+        assert_eq!(result[0].window_count, 1);
+        assert_eq!(result[0].instance_count(), 1);
+        snapshot.application_windows.push(1); // two top-level windows in one PID
+        let result = resolve_activities(&definitions, &snapshot);
+        assert_eq!(result[0].instance_count(), 2);
+        assert_eq!(result[0].process_count(), 10);
+        snapshot.application_windows.clear();
+        snapshot.foreground_pid = Some(999);
+        let result = resolve_activities(&definitions, &snapshot);
+        assert_eq!(result[0].window_count, 0);
+        assert_eq!(result[0].instance_count(), 1);
+        assert!(!result[0].foreground);
+    }
 
-            display_name: None,
-            verb: None,
-            image: None,
-            image_url: None,
-
-            buttons_enabled: true,
-            buttons: Vec::new(),
-
-            windows_processes: vec![process.to_owned()],
+    #[test]
+    fn xml_instance_modes_keep_raw_counts_and_deduplicate_aliases() {
+        for (tag, mode, expected) in [
+            ("", InstanceCountMode::Windows, 1),
+            (
+                "<instance-count-mode>windows</instance-count-mode>",
+                InstanceCountMode::Windows,
+                1,
+            ),
+            (
+                "<instance-count-mode>processes</instance-count-mode>",
+                InstanceCountMode::Processes,
+                3,
+            ),
+        ] {
+            let definition: ActivityDefinition = quick_xml::de::from_str(&format!("<activity><name>Foo</name>{tag}<windows-process>Foo.exe</windows-process><windows-process>FooLegacy.exe</windows-process><windows-process>FOO.exe</windows-process></activity>")).unwrap();
+            assert_eq!(definition.instance_count_mode, mode);
+            let snapshot = ProcessSnapshot {
+                processes: [
+                    (100, "foo.exe".into()),
+                    (200, "foo.exe".into()),
+                    (300, "foolegacy.exe".into()),
+                ]
+                .into(),
+                application_windows: vec![100],
+                foreground_pid: Some(300),
+            };
+            let result = resolve_activities(&[definition], &snapshot);
+            assert_eq!(result[0].pids, vec![100, 200, 300]);
+            assert_eq!(result[0].process_count(), 3);
+            assert_eq!(result[0].window_count, 1);
+            assert!(result[0].foreground);
+            assert_eq!(result[0].displayed_instances(mode), expected);
         }
     }
 
+    use super::*;
     #[test]
-    fn preserves_xml_order_and_combines_matches() {
-        let definitions = vec![
-            definition("World of Warcraft", "wow"),
-            definition("Visual Studio Code", "code"),
-            definition("OBS Studio", "obs"),
-        ];
-        let running = HashSet::from(["obs".to_owned(), "wow".to_owned(), "code".to_owned()]);
-
-        let result = resolve_activities(&definitions, &running).expect("should resolve");
+    fn aliases_counts_foreground_and_order() {
+        let definitions: Vec<ActivityDefinition> = ["<activity><name>Game</name><windows-process> WOW.exe </windows-process><windows-process>launcher.exe</windows-process><windows-process>wow.exe</windows-process></activity>", "<activity><name>Code</name><windows-process>code.exe</windows-process></activity>"].iter().map(|s| quick_xml::de::from_str(s).unwrap()).collect();
+        let mut snapshot = ProcessSnapshot {
+            processes: [
+                (100, "wow.exe".into()),
+                (200, "wow.exe".into()),
+                (300, "code.exe".into()),
+            ]
+            .into(),
+            foreground_pid: Some(200),
+            application_windows: vec![100, 200, 300],
+        };
+        let resolved = resolve_activities(&definitions, &snapshot);
+        assert_eq!(resolved[0].name, "Game");
+        assert_eq!(resolved[0].instance_count(), 2);
+        assert!(resolved[0].foreground);
+        assert!(!resolved[1].foreground);
+        snapshot.processes.remove(&100);
         assert_eq!(
-            result.names,
-            ["World of Warcraft", "Visual Studio Code", "OBS Studio"]
+            resolve_activities(&definitions, &snapshot)[0].instance_count(),
+            1
         );
-        assert_eq!(result.details, "Active: World of Warcraft");
-        assert_eq!(result.state, "Also: Visual Studio Code + OBS Studio");
-    }
-
-    #[test]
-    fn returns_none_when_nothing_matches() {
-        let definitions = vec![definition("Game", "game")];
-        assert!(resolve_activities(&definitions, &HashSet::new()).is_none());
-    }
-
-    #[test]
-    fn truncation_is_unicode_safe() {
-        let value = "é".repeat(200);
-        let result = truncate(&value, 128);
-        assert_eq!(result.chars().count(), 128);
-        assert!(result.ends_with('…'));
+        snapshot.processes.clear();
+        assert!(resolve_activities(&definitions, &snapshot).is_empty());
     }
 }
