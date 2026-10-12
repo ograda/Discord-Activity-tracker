@@ -36,7 +36,6 @@ const VISIBILITY_RETRY: usize = 10;
 #[cfg(test)]
 const TEST_VISIBILITY: u32 = WM_APP + 7;
 const MENU_VISIBILITY: usize = 1001;
-const MENU_RELOAD: usize = 1002;
 const MENU_EXIT: usize = 1003;
 const MENU_SETTINGS: usize = 1004;
 const MENU_STATISTICS: usize = 1005;
@@ -209,7 +208,6 @@ fn run_tray(hidden: Arc<AtomicBool>) -> Result<(), &'static str> {
             MENU_VISIBILITY,
             visibility_label(hidden.load(Ordering::SeqCst)),
         )?;
-        append_menu_item(menu, MENU_RELOAD, "Reload activities.xml")?;
         append_menu_item(menu, MENU_SETTINGS, "Settings...")?;
         append_menu_item(menu, MENU_STATISTICS, "Statistics...")?;
 
@@ -280,6 +278,10 @@ unsafe extern "system" fn window_proc(
         return 0;
     }
     match message {
+        windows_sys::Win32::UI::WindowsAndMessaging::WM_SETTINGCHANGE => {
+            crate::ui_palette::system_changed();
+            0
+        }
         #[cfg(test)]
         TEST_VISIBILITY => {
             if state.is_null() {
@@ -330,10 +332,6 @@ unsafe extern "system" fn window_proc(
                         unsafe { &*state }.hidden.fetch_xor(true, Ordering::SeqCst);
                         sync_visibility(window);
                     }
-                }
-
-                MENU_RELOAD => {
-                    send_command(TrayCommand::Reload);
                 }
 
                 MENU_STATISTICS => {
@@ -451,6 +449,10 @@ fn append_menu_item(menu: HMENU, id: usize, label: &str) -> Result<(), &'static 
     Ok(())
 }
 
+pub fn request_reload() {
+    send_command(TrayCommand::Reload);
+}
+
 fn send_command(command: TrayCommand) {
     if let Some(sender) = COMMAND_SENDER.get() {
         let _ = sender.send(command);
@@ -495,7 +497,7 @@ mod tests {
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             GetDlgItem, GetWindowTextW, IsWindow, SendMessageW,
         };
-        let (sender, _receiver) = mpsc::channel();
+        let (sender, receiver) = mpsc::channel();
         let hidden = Arc::new(AtomicBool::new(false));
         start(
             sender,
@@ -551,6 +553,16 @@ mod tests {
             SendMessageW(tray, WM_COMMAND, MENU_SETTINGS, 0);
             let settings = crate::tests::find_own_window("DatSettings");
             assert!(!settings.is_null());
+            let menu = MENU_HANDLE.load(Ordering::SeqCst) as HMENU;
+            assert_eq!(
+                windows_sys::Win32::UI::WindowsAndMessaging::GetMenuState(menu, 1002, MF_BYCOMMAND),
+                u32::MAX
+            );
+            SendMessageW(settings, WM_COMMAND, 110, 0);
+            assert!(matches!(
+                receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+                TrayCommand::Reload
+            ));
             SendMessageW(settings, WM_COMMAND, 107, 0); // Open Statistics
             assert_eq!(statistics, crate::tests::find_own_window("DatStatistics"));
             SendMessageW(statistics, WM_COMMAND, 202, 0); // Refresh

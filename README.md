@@ -31,8 +31,8 @@ are their persistent identifiers: renaming one starts a separate history.
 
 ## Tray and Settings
 
-The tray provides Hide activities / Show activities, Reload activities.xml, Settings...,
-Statistics..., and Exit. Reload validates the XML before applying changes; an invalid reload keeps
+The tray provides Hide activities / Show activities, Settings..., Statistics..., and Exit.
+Reload XML is available in the Settings footer. It validates the XML before applying changes; an invalid reload keeps
 the working configuration. Pending/snoozed reminders with unchanged names retain
 their occurrence and queue position. Removing a reminder removes its pending card
 and marks an observed occurrence as `configuration_removed`.
@@ -46,7 +46,7 @@ singleton viewer as the tray entry. All mutable data lives in:
     settings.xml
     dat.db
     dat.lock
-    dat-errors.log   (when a database error occurs)
+    dat-errors.log   (when a database or export error occurs)
 ```
 
 `activities.xml` is never rewritten. Settings are replaced atomically. Missing
@@ -57,12 +57,20 @@ prevents simultaneous DAT instances from counting the same observations twice.
 | XML setting | Default | Meaning |
 | --- | --- | --- |
 | `tracking-mode` | `total` | `total` (open) or `active` (foreground) |
+| `activity-time-display` | `cumulative-total` | `cumulative-total` or `current-dat-run`; selects displayed time without changing collection |
 | `persist-activity-time` | `true` | Accumulate both metrics across activity and DAT restarts |
 | `session-history` | `false` | Store observed activity sessions |
 | `multiple-instances` | `true` | Show visible-window instance count in Discord when greater than one |
 | `detailed-statistics` | `false` | Store reminder interactions and detailed activity transitions/sessions |
 | `display-focused-activity` | `false` | Follow the foreground tracked activity instead of the carousel |
+| `color-palette` | `dat-default` | `dat-default`, `system`, `dark`, or `light`; shared by Settings, Statistics and reminders |
 | `presence-display` | `activity-names` | Include other activity count; `selected-only` omits it from details |
+
+The Appearance section applies its palette after Save. DAT Default uses warm black,
+crimson and ember accents; Dark uses neutral charcoal; Light uses pale surfaces and
+dark text. System follows the Windows application light/dark preference, including
+Windows theme-change notifications. The helmet asset is unchanged. Custom buttons
+keep their palette during hover, press, keyboard focus and disabled states.
 
 Both legacy `activity-names` and `activity-count` settings remain accepted and
 now use the requested count-based card format. Settings offers Include other
@@ -77,6 +85,38 @@ adding new time to the saved totals. Re-enabling it resumes from the saved total
 without importing time collected while persistence was off.
 
 ## Time tracking and instances
+
+### Statistics JSON export
+
+In **Statistics > Export JSON**, choose the destination directory and filename
+in the native Windows Save As dialog. DAT exports all locally saved statistics
+and history, including records beyond the visible Statistics rows. No data is
+uploaded, opened or shared automatically. The suggested timestamped filename uses UTC.
+
+Schema 3 exports also include `dat_runs` and `activity_observations`, preserving
+the run identities and intervals used by scoped Statistics.
+
+The pretty-printed JSON contains `format: "dat-statistics-export"`,
+`format_version: 1`, `exported_at_utc` (UTC ISO timestamp), and
+`database_schema_version` read from SQLite. Its five arrays contain:
+
+- `activity_totals`: cumulative open and active time per activity.
+- `activity_sessions`: all observed session segments, metrics and instance peaks.
+- `activity_events`: activity/process/window/focus transitions, including PID arrays.
+- `reminder_occurrences`: reminder responses, snoozes and completion state.
+- `reminder_events`: recorded reminder interactions.
+
+Database column names and values are retained; timestamps such as `start_ms` and
+`at_ms` are Unix milliseconds, and durations such as `open_ms`, `active_ms` and
+`elapsed_ms` remain integer milliseconds. Unknown/unfinished fields stay JSON
+`null`; empty tables produce empty arrays. PID CSV values become integer arrays;
+invalid PID data reports an error instead of producing a misleading export.
+DAT checkpoints pending tracker data through its normal persistence mechanism,
+then reads a consistent, read-only database snapshot without ending live sessions.
+It writes and syncs a temporary file beside the chosen destination before replacing
+the export. Save As confirms overwrites. Errors preserve existing exports and are
+reported in the window and `dat-errors.log`. Locks, logs, configuration and Discord
+credentials are not included.
 
 DAT maintains both `total_open_time` and `foreground_active_time` internally.
 Total/open time advances once per running activity regardless of focus. Active
@@ -267,18 +307,73 @@ Enabling statistics during an existing occurrence begins recording with the next
 new occurrence, avoiding a partial interaction history. Disabling it immediately
 ends recording for the current occurrence without affecting its timer or actions.
 
+## Desktop window theme
+
+Settings and Statistics use the embedded DAT helmet, warm charcoal surfaces,
+crimson card outlines and ember-orange accents. Settings uses the full content
+width; there is no decorative side panel. Controls retain native keyboard/input
+behavior, focus cues, help tooltips, Save/Cancel semantics and singleton ownership.
+Settings centers Cancel, Reload XML and Save in one footer action area.
+Statistics presents Application Activity, Reminder Statistics and Recent Sessions
+in separate bordered panels with descriptive subtitles, selectable native tables,
+alternating row backgrounds and aligned numeric columns. The top summary-card
+strip is omitted. The database snapshot and calculations are unchanged.
+The built-in Windows Rich Edit control falls back to a plain report if unavailable.
+No new database queries, filters, search, export, or tracking features were added.
+
+The shared Win32 paint helper owns its fonts, brushes and icon handles per window;
+child subclasses are removed before the resources are released. Standard window
+controls remain Windows-managed, and older Windows versions may retain
+a light title bar. Statistics has a minimum 1100 x 680 window size; detail reports
+use pagination without visible scrollbars. Existing Windows DPI virtualization is retained rather than changing DPI
+awareness for the tray or reminder HUD. Multi-monitor/high-DPI polish remains
+part of stabilization.
+
+For synthetic-data visual captures (no writes to user settings/history):
+
+```powershell
+$env:DAT_UI_CAPTURE='1'
+cargo test --offline native_themed_windows -- --ignored --test-threads=1 --nocapture
+```
+
+Captures are written to ignored `target/ui-previews/` as BMP files.
+
 ## Statistics window
 
-Tray > Statistics... and Settings > Open Statistics open/focus the same plain
-native read-only window. Refresh reloads the committed database snapshot, normally
-up to 30 seconds behind the live tracker. It shows:
+Tray > Statistics... and Settings > Open Statistics open/focus the same themed
+native read-only window. Refresh and scope changes request the existing tracker
+checkpoint, then read the newest committed snapshot without closing live sessions.
+It shows:
 
-- Activity: saved Total/Open time, Active/Foreground time, recorded session count,
+- Activity: saved Total/Open time, Active/Foreground time, recorded session/event counts,
   peak window instances, peak processes, and last observed session start (UTC).
 - Reminder: completed occurrence count, snooze count across all recorded
   occurrences, and average response time of completed occurrences only.
 
-If cumulative totals are absent, recorded-session durations are shown and clearly
+The compact scope selector applies **Current run / Today / This week / Total**
+to all three views. Current run uses the current DAT execution ID. Today begins at
+local midnight; This week begins at local Monday midnight. Date ranges end at now.
+Observed intervals are clipped to the range separately for open and foreground
+time, so a 23:30?01:30 observation contributes 1h30 to Today at 01:30. Excluded
+suspend gaps contribute no time. Session counts include segments observed in the
+scope; event counts use their recorded timestamps. Reminder completions and
+snoozes use completion/event timestamps; average response describes the completed
+occurrences in that scope.
+
+Range durations are available for observations recorded after the schema-3 update.
+Legacy cumulative/session totals cannot reconstruct exact foreground intersections
+and remain available under Total; legacy rows are never assigned invented run IDs.
+Existing collection switches still control what is saved. With all activity
+collection disabled, current-run display remains available in memory, while
+Statistics shows only saved collection periods.
+
+In Settings > Tracking, **Displayed activity time** selects **Cumulative total**
+(default) or **Current DAT run**. Current-run time starts at the first observation,
+resets on DAT startup, and accumulates across activity close/reopen cycles.
+Applications already running at startup receive no pre-DAT runtime. Switching
+display options never deletes historical totals.
+
+If cumulative totals are absent under Total, recorded-session durations are shown and clearly
 labeled. Totals and session sums are never added together or multiplied by joins.
 Session counts include open observation segments; they reflect enabled history
 periods, not inferred lifetime execution counts. Old process-based peaks are
@@ -287,13 +382,35 @@ labeled as process counts; historical window counts are unavailable.
 Empty/missing data explains which collection settings to enable. Busy, unsupported,
 or inaccessible databases show an error with a Refresh suggestion. Reading does
 not create a database, migrate it, recover/close live sessions, or enable tracking.
-Previously collected data remains visible when collection is disabled. Styling,
-charts, exports, and a detailed history browser remain outside this pass.
+Previously collected data remains visible when collection is disabled.
+
+The dashboard opens with Application Activity and Reminder Statistics side by
+side, and a full-width Recent Sessions card below. Complete overview rows are
+limited to the available panel height; there is no search field or scrollbar.
+Application previews show open/active time; **View all applications** also exposes
+session/event counts and recorded window/process peaks. **View reminder history** shows
+all available reminder summaries; **View all sessions** shows every activity's
+latest observed session. These views use Previous/Next pagination sized to the
+available space, and **Back to overview** returns to the three cards. Refresh
+reloads the snapshot and clamps the page if the dataset or window size changes.
+Reopening Statistics returns to Overview in the existing singleton window.
+
+The minimum window size is 1100 x 680 logical pixels to keep the two top cards
+readable. The app retains Windows' existing DPI virtualization/scaling; it does
+not introduce a separate per-monitor DPI system in this layout pass. DAT Default,
+Dark, Light and System palettes share the same layout. Settings' centered footer
+orders its actions **Cancel / Reload XML / Save**.
+
+Recent Sessions remains the latest observed session per activity (UTC in the
+column heading), not a complete session-event browser. Reminder history uses the
+existing saved summaries, not a new occurrence/event reader. No four-card summary
+strip is included. Export JSON always exports all saved data regardless of scope;
+a detailed event history browser and charts remain deferred.
 
 ## Local database
 
 `rusqlite` uses [bundled SQLite](https://github.com/rusqlite/rusqlite#notes-on-building-rusqlite-and-libsqlite3-sys).
-Schema version 2 is tracked with `PRAGMA user_version`. Initialization is
+Schema version 3 is tracked with `PRAGMA user_version`. Initialization is
 transactional, additive, and rejects newer unsupported versions without deleting
 history. Times ending in `_ms` are Unix milliseconds for dates, or integer
 milliseconds for durations.
@@ -305,10 +422,18 @@ milliseconds for durations.
 | `activity_events` | integer `id`, `activity`, `at_ms`, `kind`, comma-separated `pids`, `foreground`, nullable `window_count` |
 | `reminder_occurrences` | `id` primary key, `name`, `first_due_ms`, `done_ms`, `elapsed_ms`, `snooze_count`, `completion_interval_ms`, `status` |
 | `reminder_events` | integer `id`, `occurrence_id` foreign key, `at_ms`, `elapsed_ms`, `kind` |
+| `dat_runs` | `id`, `started_at_ms`, `last_seen_ms`, `ended_at_ms`, `end_reason` |
+| `activity_observations` | run/activity/session identity, observed `start_ms`/`end_ms`, `open_ms`/`active_ms`, process/window counts |
 
 The version 1-to-2 migration only adds the two window-count columns. Existing
 rows/totals/reminder events are retained; historical window counts stay NULL.
-The Statistics reader also supports an unmigrated version 1 database read-only.
+The version 2-to-3 migration adds `dat_runs`, nullable `run_id` references on
+activity sessions/events and reminder occurrences/events, and observed intervals.
+Only contiguous intervals with identical foreground/instance state are combined;
+collection gaps are retained. Existing totals and history are preserved. Each DAT
+startup creates a new run; clean shutdown records `dat_shutdown`. Interrupted runs
+end at their last durable checkpoint, alongside existing interrupted-session
+recovery. Total Statistics also supports unmigrated versions 1 and 2 read-only.
 
 Indexes cover activity session starts and reminder due/completion dates. Detailed
 activity events record opening, closing, PID-set changes (including replacements
@@ -316,7 +441,8 @@ with unchanged counts), window-count changes, foreground changes, and observatio
 They only include configured activities and matching PIDs, not every process.
 
 Transactions checkpoint about every 30 seconds, on settings changes, and at
-shutdown. Sessions update existing rows instead of inserting polling records.
+shutdown, and before Statistics refresh/export. Sessions update existing rows
+instead of inserting polling records.
 Failed transactions retain pending changes in memory for retry and log errors;
 tracking, Discord, and reminders continue. Database errors also go to a local
 `dat-errors.log` (reset after approximately 1 MiB), so release builds without a
@@ -324,7 +450,7 @@ console retain diagnostic errors. Startup closes interrupted sessions at
 their last durable checkpoint. Forced termination can lose the most recent
 unflushed interval. A persistent write failure followed by exit loses buffered
 updates; errors are reported rather than silently discarded. Missing local data
-access leaves tracking usable in memory. The Statistics window reads saved summaries; detailed history/export UI is deferred.
+access leaves tracking usable in memory. The Statistics window reads scoped saved summaries; a detailed history browser is deferred.
 
 ## Validation
 
@@ -373,7 +499,7 @@ publishing/distribution preparation; 2.0 handles architectural/code-quality
 refactoring. This work adds no installer, updater, release infrastructure,
 website, community backend, Discord server/bot integration, accounts, telemetry,
 remote API, cloud sync, web dashboard, gamification, or additional OS support.
-UI styling, Discord product pages/App Directory publishing/verification, and
+Further UI polish, Discord product pages/App Directory publishing/verification, and
 distribution work remain deferred. Metadata Inspector/probe, window-title/file/
 JSON/local-API/plugin providers, and automatic game integrations are explicitly
 POST-2.0 / POST-RELEASE. The full architecture refactor remains 2.0.
@@ -382,3 +508,30 @@ The public Discord application/assets policy remains undecided.
 ## License
 
 MIT
+
+### Reminder rendering
+
+The active toast has one compact footer with the embedded DAT helmet and its
+configured interval (for example, `every 01:15 hours`). Queued cards omit this
+footer. The HUD remains a no-activate popup without a conventional title bar.
+Elapsed time and pointer-state changes invalidate only their own rectangles.
+Painting uses an offscreen GDI buffer and one dirty-region transfer; background
+erasure is suppressed. A separate timer repairs lost topmost status without
+re-showing the toast. Identical queue snapshots do not trigger layout redraws.
+
+Reminder icons use the existing XML `icon` field: `water`, `stand_up`, `stretch`,
+`eye_rest`, and `generic` select embedded ICO image assets, with `stand`, `move`, and `eyes`
+retained as aliases. Custom glyphs still work. Missing/empty icons omit the icon
+card and reclaim its layout space. No external icon downloads are needed.
+The original default artwork lives in `assets/reminders/` (32/64px ICOs), with a
+standard-library Python regeneration script. Windows resources embed the assets;
+no external files or downloads are needed at runtime. Custom glyphs still use fonts.
+The active toast uses a 50px icon card, 36px buttons, a single title/timer row, accented Done and neutral Snooze,
+with the existing branding footer. All palettes share the same compact layout.
+
+Reminder typography uses privately embedded Rajdhani SemiBold for activity text
+with icon-only Done/Snooze controls. Done occupies approximately two-thirds of the
+button row; each top-row label is centered over its corresponding button.
+Oxanium supplies Bold timer/overflow, SemiBold DAT branding, and Medium interval text. Font sources, licenses and
+static-weight regeneration instructions are in `assets/fonts/`. No font
+installation or runtime network access is required.

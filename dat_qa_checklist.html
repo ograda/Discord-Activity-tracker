@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DAT QA Checklist</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f0d0c;
+      --panel: #171211;
+      --panel-2: #211816;
+      --border: #5f241b;
+      --accent: #f05a24;
+      --accent-2: #ff8a3d;
+      --text: #f7f2ef;
+      --muted: #b9aaa4;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background:
+        radial-gradient(circle at top, rgba(240, 90, 36, 0.08), transparent 35%),
+        var(--bg);
+      color: var(--text);
+    }
+
+    .wrap {
+      width: min(980px, calc(100% - 32px));
+      margin: 32px auto 48px;
+    }
+
+    header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 28px;
+    }
+
+    .subtitle {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .summary {
+      color: var(--muted);
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .summary strong {
+      color: var(--accent-2);
+    }
+
+    .section {
+      background: linear-gradient(180deg, var(--panel-2), var(--panel));
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin: 14px 0;
+      overflow: hidden;
+      box-shadow: 0 8px 30px rgba(0,0,0,.22);
+    }
+
+    .section h2 {
+      margin: 0;
+      padding: 14px 16px;
+      font-size: 16px;
+      color: var(--accent-2);
+      border-bottom: 1px solid rgba(240, 90, 36, 0.18);
+    }
+
+    .items {
+      padding: 8px;
+    }
+
+    label {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 9px 10px;
+      border-radius: 7px;
+      cursor: pointer;
+      line-height: 1.35;
+    }
+
+    label:hover {
+      background: rgba(255,255,255,.035);
+    }
+
+    input[type="checkbox"] {
+      margin-top: 2px;
+      width: 17px;
+      height: 17px;
+      accent-color: var(--accent);
+      flex: 0 0 auto;
+    }
+
+    input[type="checkbox"]:checked + span {
+      color: var(--muted);
+      text-decoration: line-through;
+      text-decoration-color: rgba(116,214,138,.55);
+    }
+
+    footer {
+      margin-top: 18px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>DAT QA Checklist</h1>
+        <div class="subtitle">Checklist de revisão e estabilização do Discord Activity Tracker</div>
+      </div>
+      <div class="summary"><strong id="doneCount">0</strong>/<span id="totalCount">0</span> concluídos</div>
+    </header>
+
+    <section class="section">
+      <h2>Tracking / atividades</h2>
+      <div class="items">
+        <label><input type="checkbox"><span>Total / Open: duas ou mais atividades abertas acumulam tempo simultaneamente.</span></label>
+        <label><input type="checkbox"><span>Active / Foreground: somente a atividade em foreground acumula tempo ativo.</span></label>
+        <label><input type="checkbox"><span>Alternar Total ↔ Active não perde nem mistura os dois acumuladores.</span></label>
+        <label><input type="checkbox"><span>Persist cumulative activity time mantém os totais após fechar/reabrir atividade.</span></label>
+        <label><input type="checkbox"><span>Fechar e reabrir o DAT preserva os totais persistidos.</span></label>
+        <label><input type="checkbox"><span>Com persistência desligada, não adiciona tempo aos totais salvos.</span></label>
+        <label><input type="checkbox"><span>Store activity/session history cria e encerra sessões corretamente.</span></label>
+        <label><input type="checkbox"><span>Desligar/ligar history no meio de uma execução não cria sessões falsas.</span></label>
+        <label><input type="checkbox"><span>instance-count-mode=windows conta janelas reais.</span></label>
+        <label><input type="checkbox"><span>instance-count-mode=processes conta PIDs únicos.</span></label>
+        <label><input type="checkbox"><span>VS Code/Chrome não contam subprocessos como janelas quando usam windows.</span></label>
+        <label><input type="checkbox"><span>Fechar uma de várias instâncias não encerra a atividade.</span></label>
+        <label><input type="checkbox"><span>Fechar a última instância encerra a sessão.</span></label>
+        <label><input type="checkbox"><span>Display focused activity acompanha WoW → Chrome → VS Code corretamente.</span></label>
+        <label><input type="checkbox"><span>Foreground não rastreado mostra o fallback do Activity Tracker.</span></label>
+        <label><input type="checkbox"><span>Carousel continua funcionando quando focused display está desligado.</span></label>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Discord</h2>
+      <div class="items">
+        <label><input type="checkbox"><span>name / details / state corretos em todos os modos.</span></label>
+        <label><input type="checkbox"><span>Singular/plural correto: 1 activity, 2 activities, 1 hour, etc.</span></label>
+        <label><input type="checkbox"><span>Instâncias só aparecem quando &gt; 1 e quando habilitadas.</span></label>
+        <label><input type="checkbox"><span>Botões globais funcionam.</span></label>
+        <label><input type="checkbox"><span>Botões por atividade substituem os globais corretamente.</span></label>
+        <label><input type="checkbox"><span>Atividade com um botão mostra um botão.</span></label>
+        <label><input type="checkbox"><span>buttons-enabled=false remove os botões.</span></label>
+        <label><input type="checkbox"><span>image-url abre a URL correta.</span></label>
+        <label><input type="checkbox"><span>tracker-status aparece corretamente.</span></label>
+        <label><input type="checkbox"><span>Discord fechado/reaberto reconecta sem interromper tracking local.</span></label>
+        <label><input type="checkbox"><span>Hide → Show preserva o mesmo timestamp verde.</span></label>
+        <label><input type="checkbox"><span>Hidden mostra somente Activity Tracker.</span></label>
+        <label><input type="checkbox"><span>Ícone do tray muda para hidden e volta ao normal.</span></label>
+        <label><input type="checkbox"><span>Menu alterna corretamente entre Hide activities / Show activities.</span></label>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Reminders</h2>
+      <div class="items">
+        <label><input type="checkbox"><span>Trigger ocorre no intervalo correto.</span></label>
+        <label><input type="checkbox"><span>Done agenda a próxima ocorrência corretamente.</span></label>
+        <label><input type="checkbox"><span>Snooze retorna no momento correto.</span></label>
+        <label><input type="checkbox"><span>Uma ocorrência não é duplicada pelo polling.</span></label>
+        <label><input type="checkbox"><span>Timer continua correto após Snooze.</span></label>
+        <label><input type="checkbox"><span>Fila ativa + cards pendentes + +N funcionam.</span></label>
+        <label><input type="checkbox"><span>Promoção de card pendente funciona.</span></label>
+        <label><input type="checkbox"><span>+N está centralizado e estilizado.</span></label>
+        <label><input type="checkbox"><span>Ícone customizado e reminder sem ícone ficam bem.</span></label>
+        <label><input type="checkbox"><span>Som .wav toca uma vez ao gerar nova ocorrência.</span></label>
+        <label><input type="checkbox"><span>Reminder continua TOPMOST ao alternar aplicações.</span></label>
+        <label><input type="checkbox"><span>Hover em Done/Snooze por 30–60 s não pisca.</span></label>
+        <label><input type="checkbox"><span>DAT Default / Dark / Light / System funcionam no HUD.</span></label>
+        <label><input type="checkbox"><span>Intervalos do footer: minutos, horas exatas e HH:MM.</span></label>
+        <label><input type="checkbox"><span>Estatísticas de Done/Snooze correspondem às interações reais.</span></label>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Settings / Statistics / UI</h2>
+      <div class="items">
+        <label><input type="checkbox"><span>Settings funciona em 100%, 125% e 150% DPI.</span></label>
+        <label><input type="checkbox"><span>Statistics funciona em 100%, 125% e 150% DPI.</span></label>
+        <label><input type="checkbox"><span>Reminder HUD funciona em 100%, 125% e 150% DPI.</span></label>
+        <label><input type="checkbox"><span>Todos os ? exibem tooltip correto.</span></label>
+        <label><input type="checkbox"><span>Nenhum botão volta ao estilo nativo do Windows em hover/pressed/focus.</span></label>
+        <label><input type="checkbox"><span>Mudança de paleta aplica corretamente.</span></label>
+        <label><input type="checkbox"><span>System acompanha Light/Dark conforme comportamento implementado.</span></label>
+        <label><input type="checkbox"><span>Reload XML válido aplica as alterações.</span></label>
+        <label><input type="checkbox"><span>Reload XML inválido mantém a configuração anterior.</span></label>
+        <label><input type="checkbox"><span>Statistics Overview limita linhas sem perder dados.</span></label>
+        <label><input type="checkbox"><span>View all applications, reminders e sessions exibem toda informação.</span></label>
+        <label><input type="checkbox"><span>Paginação não duplica nem pula registros.</span></label>
+        <label><input type="checkbox"><span>Refresh mostra o último checkpoint corretamente.</span></label>
+        <label><input type="checkbox"><span>Export JSON salva todo o snapshot local no caminho escolhido.</span></label>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Windows / estabilidade</h2>
+      <div class="items">
+        <label><input type="checkbox"><span>Minimizar/restaurar aplicações.</span></label>
+        <label><input type="checkbox"><span>Fullscreen / borderless fullscreen.</span></label>
+        <label><input type="checkbox"><span>Troca de monitor.</span></label>
+        <label><input type="checkbox"><span>Reiniciar explorer.exe.</span></label>
+        <label><input type="checkbox"><span>Sleep → Resume.</span></label>
+        <label><input type="checkbox"><span>Logout/shutdown normal.</span></label>
+        <label><input type="checkbox"><span>Encerrar DAT pelo tray.</span></label>
+        <label><input type="checkbox"><span>Ctrl+C em debug.</span></label>
+        <label><input type="checkbox"><span>Matar processo à força e depois reiniciar DAT.</span></label>
+        <label><input type="checkbox"><span>Tentar abrir duas instâncias do DAT e confirmar dat.lock.</span></label>
+        <label><input type="checkbox"><span>Rodar 4–8 horas continuamente.</span></label>
+        <label><input type="checkbox"><span>Rodar overnight.</span></label>
+        <label><input type="checkbox"><span>CPU em idle permanece baixa.</span></label>
+        <label><input type="checkbox"><span>RAM não cresce continuamente.</span></label>
+        <label><input type="checkbox"><span>dat.db não cresce absurdamente em poucas horas.</span></label>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Persistência / documentação</h2>
+      <div class="items">
+        <label><input type="checkbox"><span>Statistics após restart bate com os valores anteriores.</span></label>
+        <label><input type="checkbox"><span>Sessões interrompidas não aparecem como sessões completadas falsas.</span></label>
+        <label><input type="checkbox"><span>Erros de banco vão para dat-errors.log.</span></label>
+        <label><input type="checkbox"><span>Migration funciona com banco anterior.</span></label>
+        <label><input type="checkbox"><span>README corresponde exatamente à UI atual.</span></label>
+        <label><input type="checkbox"><span>activities.example.xml contém todas as tags atuais.</span></label>
+        <label><input type="checkbox"><span>Nenhuma feature removida ainda está documentada.</span></label>
+      </div>
+    </section>
+
+    <footer>
+      O progresso é salvo automaticamente no navegador usando localStorage.
+    </footer>
+  </div>
+
+  <script>
+    (() => {
+      const STORAGE_KEY = "dat-qa-checklist-v1";
+      const boxes = [...document.querySelectorAll('input[type="checkbox"]')];
+      const doneCount = document.getElementById("doneCount");
+      const totalCount = document.getElementById("totalCount");
+
+      function updateSummary() {
+        doneCount.textContent = boxes.filter(box => box.checked).length;
+        totalCount.textContent = boxes.length;
+      }
+
+      function save() {
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify(boxes.map(box => box.checked))
+        );
+        updateSummary();
+      }
+
+      function load() {
+        try {
+          const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+          boxes.forEach((box, index) => {
+            box.checked = Boolean(saved[index]);
+          });
+        } catch (_) {}
+        updateSummary();
+      }
+
+      boxes.forEach(box => box.addEventListener("change", save));
+      load();
+    })();
+  </script>
+</body>
+</html>

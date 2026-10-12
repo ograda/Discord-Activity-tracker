@@ -1,0 +1,22 @@
+﻿DAT Reminder HUD fonts
+
+Retrieved from the Google Fonts repository on 2026-10-11:
+https://github.com/google/fonts/tree/main/ofl/rajdhani
+https://github.com/google/fonts/tree/main/ofl/oxanium
+
+Rajdhani-SemiBold.ttf: original upstream static face.
+Oxanium-Variable.ttf: original upstream variable source.
+Oxanium-Regular/Medium/SemiBold/Bold.ttf: static exports using FontTools 4.65.0
+and generate_static.py. Family names and upstream copyright notices retained.
+See Rajdhani-OFL.txt and Oxanium-OFL.txt for the included SIL OFL licenses.
+
+The five static faces are included in the executable and registered privately
+in memory for the HUD lifetime. No global font installation or runtime download.
+The variable source and generation script are developer assets only.
+
+Roles:
+Rajdhani SemiBold: active and queued reminder titles.
+Oxanium Bold: timer and overflow badge.
+Segoe UI Symbol, 18px: icon-only Done and Snooze controls.
+Oxanium SemiBold: DAT branding.
+Oxanium Medium: interval text.

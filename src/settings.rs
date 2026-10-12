@@ -17,6 +17,15 @@ pub enum TrackingMode {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+pub enum ActivityTimeDisplay {
+    CurrentDatRun,
+    #[default]
+    #[serde(other)]
+    CumulativeTotal,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum PresenceDisplay {
     SelectedOnly,
     ActivityCount,
@@ -25,10 +34,27 @@ pub enum PresenceDisplay {
     ActivityNames,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum ColorPalette {
+    System = 1,
+    Dark = 2,
+    Light = 3,
+    #[default]
+    #[serde(other)]
+    DatDefault = 0,
+}
+impl ColorPalette {
+    pub const ALL: [Self; 4] = [Self::DatDefault, Self::System, Self::Dark, Self::Light];
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename = "dat-settings", rename_all = "kebab-case")]
 pub struct Settings {
+    pub color_palette: ColorPalette,
     pub tracking_mode: TrackingMode,
+    pub activity_time_display: ActivityTimeDisplay,
     pub persist_activity_time: bool,
     pub session_history: bool,
     pub multiple_instances: bool,
@@ -39,7 +65,9 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            color_palette: ColorPalette::DatDefault,
             tracking_mode: TrackingMode::Total,
+            activity_time_display: ActivityTimeDisplay::CumulativeTotal,
             persist_activity_time: true,
             session_history: false,
             multiple_instances: true,
@@ -105,6 +133,7 @@ mod tests {
         assert!(!defaults.display_focused_activity);
         let changed = Settings {
             tracking_mode: TrackingMode::Active,
+            activity_time_display: ActivityTimeDisplay::CurrentDatRun,
             display_focused_activity: true,
             detailed_statistics: true,
             ..defaults

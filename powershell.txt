@@ -1,0 +1,14 @@
+while ($true) {
+    $p = Get-Process "discord-activity-mvp" -ErrorAction SilentlyContinue
+    $db = Get-Item "$env:LOCALAPPDATA\DiscordActivityTracker\dat.db" -ErrorAction SilentlyContinue
+
+    [PSCustomObject]@{
+        Time       = Get-Date
+        WorkingMB  = if ($p) { [math]::Round($p.WorkingSet64 / 1MB, 2) }
+        PrivateMB  = if ($p) { [math]::Round($p.PrivateMemorySize64 / 1MB, 2) }
+        Handles    = if ($p) { $p.Handles }
+        DbKB       = if ($db) { [math]::Round($db.Length / 1KB, 2) }
+    } | Export-Csv ".\dat-soak.csv" -Append -NoTypeInformation
+
+    Start-Sleep -Seconds 1800
+}

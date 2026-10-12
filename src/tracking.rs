@@ -1,7 +1,7 @@
 use crate::{
     resolver::ActivityObservation,
-    settings::{Settings, TrackingMode},
-    storage::{ActivityEvent, Metrics, SessionRecord, Storage, unique_id},
+    settings::{ActivityTimeDisplay, Settings, TrackingMode},
+    storage::{ActivityEvent, Metrics, ObservationInterval, SessionRecord, Storage, unique_id},
 };
 use std::{
     collections::HashMap,
@@ -15,14 +15,18 @@ struct LiveActivity {
 }
 pub struct ActivityTracker {
     live: HashMap<String, LiveActivity>,
+    run_totals: HashMap<String, Metrics>,
     previous: Instant,
+    previous_wall: Option<i64>,
     max_gap: Duration,
 }
 impl ActivityTracker {
     pub fn new(now: Instant, poll: Duration) -> Self {
         Self {
             live: HashMap::new(),
+            run_totals: HashMap::new(),
             previous: now,
+            previous_wall: None,
             max_gap: (poll * 3).max(Duration::from_secs(15)),
         }
     }
@@ -44,18 +48,44 @@ impl ActivityTracker {
             eprintln!("Excluded observation gap of {} seconds", delta.as_secs());
             0
         };
+        // Locate measured monotonic time on the wall clock without assigning
+        // clock jumps or suspend gaps to a date range.
+        let start_wall = self
+            .previous_wall
+            .filter(|previous| wall > *previous && (wall - *previous - ms as i64).abs() <= 2)
+            .unwrap_or(wall.saturating_sub(ms as i64));
+        self.previous_wall = Some(wall);
         for live in self.live.values_mut() {
             let metrics = Metrics {
                 open_ms: ms,
                 active_ms: if live.observation.foreground { ms } else { 0 },
             };
             live.metrics.add(metrics);
+            self.run_totals
+                .entry(live.observation.name.clone())
+                .or_default()
+                .add(metrics);
             if settings.persist_activity_time {
                 store.add_time(&live.observation.name, metrics);
             }
             if let Some(row) = &mut live.history {
                 row.metrics.add(metrics);
                 row.last_seen = wall;
+            }
+            if ms > 0
+                && (settings.persist_activity_time
+                    || settings.session_history
+                    || settings.detailed_statistics)
+            {
+                store.observe(ObservationInterval {
+                    activity: live.observation.name.clone(),
+                    session_id: live.history.as_ref().map(|row| row.id.clone()),
+                    start_ms: start_wall,
+                    end_ms: wall,
+                    metrics,
+                    process_count: live.observation.process_count(),
+                    window_count: live.observation.instance_count(),
+                });
             }
         }
         let closed: Vec<_> = self
@@ -152,7 +182,9 @@ impl ActivityTracker {
         }
     }
     pub fn displayed_ms(&self, name: &str, settings: &Settings, store: &Storage) -> u64 {
-        let m = if settings.persist_activity_time {
+        let m = if settings.activity_time_display == ActivityTimeDisplay::CurrentDatRun {
+            self.run_totals.get(name).copied().unwrap_or_default()
+        } else if settings.persist_activity_time {
             store.totals.get(name).copied().unwrap_or_default()
         } else {
             self.live.get(name).map(|l| l.metrics).unwrap_or_default()
@@ -197,6 +229,95 @@ fn event(store: &mut Storage, observation: &ActivityObservation, at: i64, kind: 
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn run_display_accumulates_reopens_and_resets_without_backfilling_startup() {
+        use crate::settings::ActivityTimeDisplay;
+        let start = Instant::now();
+        let mut tracker = ActivityTracker::new(start, Duration::from_secs(1));
+        let mut store = Storage::new(None);
+        store.add_time(
+            "Code",
+            Metrics {
+                open_ms: 100_000,
+                active_ms: 100_000,
+            },
+        );
+        let mut settings = Settings {
+            activity_time_display: ActivityTimeDisplay::CurrentDatRun,
+            session_history: true,
+            ..Settings::default()
+        };
+        let mut observations = [ActivityObservation {
+            name: "Code".into(),
+            pids: vec![42],
+            foreground: true,
+            window_count: 1,
+        }];
+        // Already open at first observation: no process-age time is available or used.
+        tracker.sample(&observations, start, 1000, &settings, &mut store);
+        assert_eq!(tracker.displayed_ms("Code", &settings, &store), 0);
+        assert_eq!(store.sessions.values().next().unwrap().start, 1000);
+        observations[0].foreground = false;
+        tracker.sample(
+            &observations,
+            start + Duration::from_secs(5),
+            6000,
+            &settings,
+            &mut store,
+        );
+        tracker.sample(
+            &[],
+            start + Duration::from_secs(10),
+            11000,
+            &settings,
+            &mut store,
+        );
+        observations[0].foreground = true;
+        tracker.sample(
+            &observations,
+            start + Duration::from_secs(12),
+            13000,
+            &settings,
+            &mut store,
+        );
+        tracker.sample(
+            &observations,
+            start + Duration::from_secs(15),
+            16000,
+            &settings,
+            &mut store,
+        );
+        assert_eq!(tracker.displayed_ms("Code", &settings, &store), 13_000);
+        assert_eq!(store.sessions.len(), 2);
+        settings.tracking_mode = TrackingMode::Active;
+        assert_eq!(tracker.displayed_ms("Code", &settings, &store), 8_000);
+        settings.activity_time_display = ActivityTimeDisplay::CumulativeTotal;
+        assert_eq!(tracker.displayed_ms("Code", &settings, &store), 108_000);
+        settings.activity_time_display = ActivityTimeDisplay::CurrentDatRun;
+        let mut next =
+            ActivityTracker::new(start + Duration::from_secs(20), Duration::from_secs(1));
+        next.sample(
+            &observations,
+            start + Duration::from_secs(20),
+            21000,
+            &settings,
+            &mut store,
+        );
+        assert_eq!(next.displayed_ms("Code", &settings, &store), 0);
+        assert_eq!(store.totals["Code"].open_ms, 113_000);
+        // Current-run display still counts observed time when cumulative saving is off.
+        settings.persist_activity_time = false;
+        next.sample(
+            &observations,
+            start + Duration::from_secs(25),
+            26000,
+            &settings,
+            &mut store,
+        );
+        assert_eq!(next.displayed_ms("Code", &settings, &store), 5_000);
+        assert_eq!(store.totals["Code"].active_ms, 108_000);
+    }
+
     #[test]
     fn visibility_changes_do_not_pause_local_time_or_reminders() {
         let start = Instant::now();

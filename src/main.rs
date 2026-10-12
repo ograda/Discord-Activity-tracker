@@ -11,11 +11,15 @@ mod reminders;
 mod resolver;
 mod settings;
 mod settings_window;
+mod statistics_export;
+mod statistics_scope;
 mod statistics_window;
 mod storage;
 mod tracking;
 mod tray;
 mod tray_icon;
+mod ui_palette;
+mod ui_theme;
 
 use crate::{
     config::Config,
@@ -95,8 +99,11 @@ fn main() -> Result<()> {
         .ok()
         .filter(|_| _data_lock.is_some())
         .map(|p| p.join("dat.db"));
+    ui_palette::apply(initial_settings.color_palette);
     let shared_settings = Arc::new(Mutex::new(initial_settings));
     let (tray_sender, tray_receiver) = mpsc::channel();
+    let (checkpoint_sender, checkpoint_receiver) = mpsc::channel();
+    statistics_export::set_checkpoint_sender(checkpoint_sender);
     let hidden = Arc::new(AtomicBool::new(false));
     tray::start(tray_sender, shared_settings.clone(), hidden.clone());
     let (reminder_sender, reminder_receiver) = mpsc::channel();
@@ -120,6 +127,7 @@ fn main() -> Result<()> {
                     reminder_actions: reminder_receiver,
                     reloads: reload_receiver,
                     settings: shared_settings,
+                    checkpoints: checkpoint_receiver,
                 },
                 database_path,
             )
@@ -155,6 +163,7 @@ struct TrackerChannels {
     reminder_actions: mpsc::Receiver<ReminderAction>,
     reloads: mpsc::Receiver<Config>,
     settings: SharedSettings,
+    checkpoints: mpsc::Receiver<statistics_export::CheckpointRequest>,
 }
 fn run_tracker(
     mut config: Config,
@@ -173,6 +182,7 @@ fn run_tracker(
     let mut reminders = ReminderManager::new(config.reminders.definitions(), start);
     reminders.set_statistics(settings.detailed_statistics, start);
     let mut store = Storage::new(database_path);
+    statistics_scope::set_current_run(store.run_id.clone());
     flush_storage(&mut store);
     let mut tracker = ActivityTracker::new(start, Duration::from_secs(1));
     let mut observations = Vec::<ActivityObservation>::new();
@@ -266,6 +276,13 @@ fn run_tracker(
                 next_poll = now + Duration::from_secs(config.poll_seconds);
             }
             next_sample = now + Duration::from_secs(1);
+        }
+        while let Ok(request) = channels.checkpoints.try_recv() {
+            let result = store.flush().map_err(|error| {
+                store.report_error(&error);
+                format!("Could not checkpoint statistics: {error:#}")
+            });
+            let _ = request.send(result);
         }
         if now >= next_flush {
             flush_storage(&mut store);
@@ -373,6 +390,7 @@ fn run_tracker(
     tracker.shutdown(now, wall_time(), &settings, &mut store);
     reminders.finish_statistics("dat_shutdown", now);
     reminders.checkpoint(&mut store, now);
+    store.finish_run(wall_time(), "dat_shutdown");
     flush_storage(&mut store);
     if let Err(error) = discord.clear() {
         eprintln!("Could not clear Discord on shutdown: {error:#}");
@@ -723,16 +741,19 @@ mod tests {
             }
             let (sender, receiver) = mpsc::channel();
             reminder_hud::start(sender);
-            let pending = (0..4)
+            let pending: Vec<_> = (0..4)
                 .map(|n| reminders::ReminderToast {
                     id: n.to_string(),
                     name: format!("Smoke reminder {n}"),
+                    interval_minutes: 75,
                     icon: Some("water".into()),
                     sound: None,
                     first_due: Instant::now() - Duration::from_secs(62),
                 })
                 .collect();
-            reminder_hud::render(reminders::ReminderSnapshot { pending });
+            reminder_hud::render(reminders::ReminderSnapshot {
+                pending: pending.clone(),
+            });
             let mut hud = null_mut();
             for _ in 0..100 {
                 hud = find_own_window("DiscordActivityTrackerReminderHud");
@@ -743,6 +764,35 @@ mod tests {
             }
             assert!(!hud.is_null());
             assert_ne!(IsWindowVisible(hud), 0);
+            for (palette, name) in [
+                (settings::ColorPalette::DatDefault, "dat"),
+                (settings::ColorPalette::Dark, "dark"),
+                (settings::ColorPalette::Light, "light"),
+                (settings::ColorPalette::System, "system"),
+            ] {
+                ui_palette::apply(palette);
+                thread::sleep(Duration::from_millis(100));
+                SendMessageW(hud, WM_TIMER, 1, 0);
+                SendMessageW(hud, WM_PAINT, 0, 0);
+                ui_theme::tests::capture(hud, &format!("reminder-{name}"));
+                SendMessageW(hud, WM_LBUTTONDOWN, 1, ((175isize) << 16) | 90);
+                thread::sleep(Duration::from_millis(50));
+                ui_theme::tests::capture(hud, &format!("reminder-{name}-pressed"));
+                SendMessageW(hud, windows_sys::Win32::UI::Controls::WM_MOUSELEAVE, 0, 0);
+                assert!(receiver.try_recv().is_err());
+            }
+            ui_palette::apply(settings::ColorPalette::DatDefault);
+            let mut no_icons = pending.clone();
+            for toast in &mut no_icons {
+                toast.icon = None;
+            }
+            reminder_hud::render(reminders::ReminderSnapshot { pending: no_icons });
+            thread::sleep(Duration::from_millis(150));
+            SendMessageW(hud, WM_PAINT, 0, 0);
+            ui_theme::tests::capture(hud, "reminder-no-icon");
+            reminder_hud::render(reminders::ReminderSnapshot { pending });
+            thread::sleep(Duration::from_millis(150));
+            reminder_hud::verify_hover_stability(hud);
             let style = GetWindowLongPtrW(hud, GWL_EXSTYLE) as u32;
             assert_ne!(style & WS_EX_NOACTIVATE, 0);
             assert_ne!(style & WS_EX_TOPMOST, 0);
@@ -775,11 +825,11 @@ mod tests {
             assert!(receiver.try_recv().is_err()); // no Done/Snooze from focus loss
             assert_ne!(IsWindowVisible(hud), 0);
             assert_eq!(hud, find_own_window("DiscordActivityTrackerReminderHud"));
-            SendMessageW(hud, WM_TIMER, 1, 0);
+            SendMessageW(hud, WM_TIMER, 2, 0);
             assert_eq!(GetForegroundWindow(), foreground);
             settings_window::close();
             // With four cards the active card starts at y=108; Done is y=166.
-            SendMessageW(hud, WM_LBUTTONUP, 0, ((175isize) << 16) | 20);
+            SendMessageW(hud, WM_LBUTTONUP, 0, ((175isize) << 16) | 90);
             assert!(
                 matches!(receiver.recv_timeout(Duration::from_secs(1)).unwrap(),ReminderAction::Done(id) if id=="0")
             );

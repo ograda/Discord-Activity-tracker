@@ -14,6 +14,7 @@ pub struct ReminderToast {
     pub icon: Option<String>,
     pub sound: Option<String>,
     pub first_due: Instant,
+    pub interval_minutes: u64,
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReminderSnapshot {
@@ -165,6 +166,7 @@ impl ReminderManager {
             icon: r.icon.clone(),
             sound: r.sound.clone(),
             first_due: r.occurrence.as_ref()?.started,
+            interval_minutes: r.interval.as_secs() / 60,
         })
     }
     fn reschedule(&mut self, id: &str, now: Instant, snoozed: bool) -> bool {
